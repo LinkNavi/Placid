@@ -1,0 +1,477 @@
+#ifndef PCD_EDITOR_UI_H
+#define PCD_EDITOR_UI_H
+
+#include "PCDEditorState.h"
+#include "PCDBrushFactory.h"
+#include "PCDFile.h"
+#include <imgui.h>
+#include <cstring>
+#include <algorithm>
+
+namespace PCD {
+
+class EditorUI {
+private:
+    EditorState& state;
+    
+    bool showEntityList = true;
+    bool showBrushList = true;
+    bool showProperties = true;
+    bool showToolbar = true;
+    
+    char mapNameBuffer[256] = {};
+    char authorBuffer[256] = {};
+    char entityNameBuffer[256] = {};
+    char brushNameBuffer[256] = {};
+
+public:
+    explicit EditorUI(EditorState& s) : state(s) {
+        strncpy(mapNameBuffer, state.map.name.c_str(), sizeof(mapNameBuffer) - 1);
+        strncpy(authorBuffer, state.map.author.c_str(), sizeof(authorBuffer) - 1);
+    }
+    
+    void Render() {
+        RenderMainMenuBar();
+        if (showToolbar) RenderToolbar();
+        if (showBrushList) RenderBrushList();
+        if (showEntityList) RenderEntityList();
+        if (showProperties) RenderProperties();
+        RenderStatusBar();
+    }
+    
+private:
+    void RenderMainMenuBar() {
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("New", "Ctrl+N")) state.NewMap();
+                if (ImGui::MenuItem("Open...", "Ctrl+O")) {}
+                if (ImGui::MenuItem("Save", "Ctrl+S")) SaveMap();
+                if (ImGui::MenuItem("Save As...")) {}
+                ImGui::Separator();
+                if (ImGui::MenuItem("Export .pcd")) ExportPCD();
+                ImGui::EndMenu();
+            }
+            
+            if (ImGui::BeginMenu("Edit")) {
+                if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !state.undoStack.empty())) state.Undo();
+                if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !state.redoStack.empty())) state.Redo();
+                ImGui::Separator();
+                if (ImGui::MenuItem("Delete", "Del")) state.DeleteSelected();
+                if (ImGui::MenuItem("Duplicate", "Ctrl+D")) state.DuplicateSelected();
+                ImGui::Separator();
+                if (ImGui::MenuItem("Select All", "Ctrl+A")) state.SelectAll();
+                if (ImGui::MenuItem("Deselect", "Esc")) state.DeselectAll();
+                ImGui::EndMenu();
+            }
+            
+            if (ImGui::BeginMenu("View")) {
+                ImGui::MenuItem("Toolbar", nullptr, &showToolbar);
+                ImGui::MenuItem("Brush List", nullptr, &showBrushList);
+                ImGui::MenuItem("Entity List", nullptr, &showEntityList);
+                ImGui::MenuItem("Properties", nullptr, &showProperties);
+                ImGui::Separator();
+                ImGui::MenuItem("Show Grid", nullptr, &state.settings.showGrid);
+                ImGui::MenuItem("Show Entity Icons", nullptr, &state.settings.showEntityIcons);
+                ImGui::MenuItem("Show Brush Bounds", nullptr, &state.settings.showBrushBounds);
+                ImGui::EndMenu();
+            }
+            
+            if (ImGui::BeginMenu("Create")) {
+                if (ImGui::BeginMenu("Brushes")) {
+                    if (ImGui::MenuItem("Box")) state.currentTool = EditorTool::CREATE_BOX;
+                    if (ImGui::MenuItem("Cylinder")) state.currentTool = EditorTool::CREATE_CYLINDER;
+                    if (ImGui::MenuItem("Wedge/Ramp")) state.currentTool = EditorTool::CREATE_WEDGE;
+                    ImGui::EndMenu();
+                }
+                
+                if (ImGui::BeginMenu("Spawn Points")) {
+                    if (ImGui::MenuItem("Player Start")) PlaceEntity(ENT_INFO_PLAYER_START);
+                    if (ImGui::MenuItem("Deathmatch")) PlaceEntity(ENT_INFO_PLAYER_DEATHMATCH);
+                    if (ImGui::MenuItem("Team Red")) PlaceEntity(ENT_INFO_TEAM_SPAWN_RED);
+                    if (ImGui::MenuItem("Team Blue")) PlaceEntity(ENT_INFO_TEAM_SPAWN_BLUE);
+                    ImGui::EndMenu();
+                }
+                
+                if (ImGui::BeginMenu("Triggers")) {
+                    if (ImGui::MenuItem("Once")) PlaceEntity(ENT_TRIGGER_ONCE);
+                    if (ImGui::MenuItem("Multiple")) PlaceEntity(ENT_TRIGGER_MULTIPLE);
+                    if (ImGui::MenuItem("Hurt")) PlaceEntity(ENT_TRIGGER_HURT);
+                    if (ImGui::MenuItem("Push")) PlaceEntity(ENT_TRIGGER_PUSH);
+                    if (ImGui::MenuItem("Teleport")) PlaceEntity(ENT_TRIGGER_TELEPORT);
+                    ImGui::EndMenu();
+                }
+                
+                if (ImGui::BeginMenu("Lights")) {
+                    if (ImGui::MenuItem("Point")) PlaceEntity(ENT_LIGHT);
+                    if (ImGui::MenuItem("Spot")) PlaceEntity(ENT_LIGHT_SPOT);
+                    if (ImGui::MenuItem("Environment")) PlaceEntity(ENT_LIGHT_ENV);
+                    ImGui::EndMenu();
+                }
+                
+                if (ImGui::BeginMenu("Items")) {
+                    if (ImGui::MenuItem("Health")) PlaceEntity(ENT_ITEM_HEALTH);
+                    if (ImGui::MenuItem("Armor")) PlaceEntity(ENT_ITEM_ARMOR);
+                    if (ImGui::MenuItem("Ammo")) PlaceEntity(ENT_ITEM_AMMO);
+                    ImGui::EndMenu();
+                }
+                
+                if (ImGui::BeginMenu("Weapons")) {
+                    if (ImGui::MenuItem("Shotgun")) PlaceEntity(ENT_WEAPON_SHOTGUN);
+                    if (ImGui::MenuItem("Rocket")) PlaceEntity(ENT_WEAPON_ROCKET);
+                    if (ImGui::MenuItem("Railgun")) PlaceEntity(ENT_WEAPON_RAILGUN);
+                    if (ImGui::MenuItem("Plasma")) PlaceEntity(ENT_WEAPON_PLASMA);
+                    ImGui::EndMenu();
+                }
+                
+                if (ImGui::BeginMenu("Func")) {
+                    if (ImGui::MenuItem("Door")) PlaceEntity(ENT_FUNC_DOOR);
+                    if (ImGui::MenuItem("Button")) PlaceEntity(ENT_FUNC_BUTTON);
+                    if (ImGui::MenuItem("Platform")) PlaceEntity(ENT_FUNC_PLATFORM);
+                    if (ImGui::MenuItem("Rotating")) PlaceEntity(ENT_FUNC_ROTATING);
+                    ImGui::EndMenu();
+                }
+                
+                ImGui::EndMenu();
+            }
+            
+            if (ImGui::BeginMenu("Tools")) {
+                if (ImGui::MenuItem("Select", "Q")) state.currentTool = EditorTool::SELECT;
+                if (ImGui::MenuItem("Move", "W")) state.currentTool = EditorTool::MOVE;
+                if (ImGui::MenuItem("Rotate", "E")) state.currentTool = EditorTool::ROTATE;
+                if (ImGui::MenuItem("Scale", "R")) state.currentTool = EditorTool::SCALE;
+                ImGui::Separator();
+                if (ImGui::MenuItem("Vertex Edit", "V")) state.currentTool = EditorTool::VERTEX_EDIT;
+                ImGui::EndMenu();
+            }
+            
+            ImGui::EndMainMenuBar();
+        }
+    }
+    
+    void RenderToolbar() {
+        ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(60, 350), ImGuiCond_FirstUseEver);
+        
+        ImGui::Begin("Tools", &showToolbar, ImGuiWindowFlags_NoResize);
+        
+        if (ImGui::Button("Sel", ImVec2(40, 30))) state.currentTool = EditorTool::SELECT;
+        if (ImGui::Button("Mov", ImVec2(40, 30))) state.currentTool = EditorTool::MOVE;
+        if (ImGui::Button("Rot", ImVec2(40, 30))) state.currentTool = EditorTool::ROTATE;
+        if (ImGui::Button("Scl", ImVec2(40, 30))) state.currentTool = EditorTool::SCALE;
+        ImGui::Separator();
+        if (ImGui::Button("Box", ImVec2(40, 30))) state.currentTool = EditorTool::CREATE_BOX;
+        if (ImGui::Button("Cyl", ImVec2(40, 30))) state.currentTool = EditorTool::CREATE_CYLINDER;
+        if (ImGui::Button("Wdg", ImVec2(40, 30))) state.currentTool = EditorTool::CREATE_WEDGE;
+        ImGui::Separator();
+        if (ImGui::Button("Ent", ImVec2(40, 30))) state.currentTool = EditorTool::CREATE_ENTITY;
+        if (ImGui::Button("Vtx", ImVec2(40, 30))) state.currentTool = EditorTool::VERTEX_EDIT;
+        
+        ImGui::End();
+    }
+    
+    void RenderBrushList() {
+        ImGui::SetNextWindowPos(ImVec2(10, 400), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(200, 250), ImGuiCond_FirstUseEver);
+        
+        ImGui::Begin("Brushes", &showBrushList);
+        ImGui::Text("Count: %zu", state.map.brushes.size());
+        ImGui::Separator();
+        
+        for (size_t i = 0; i < state.map.brushes.size(); i++) {
+            const auto& brush = state.map.brushes[i];
+            std::string label = brush.name.empty() 
+                ? "Brush #" + std::to_string(brush.id) 
+                : brush.name;
+            
+            bool isSelected = (state.selectedBrushIndex == static_cast<int>(i));
+            if (ImGui::Selectable(label.c_str(), isSelected)) {
+                state.selectedBrushIndex = static_cast<int>(i);
+                state.selectedEntityIndex = -1;
+            }
+        }
+        ImGui::End();
+    }
+    
+    void RenderEntityList() {
+        ImGui::SetNextWindowPos(ImVec2(220, 400), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(200, 250), ImGuiCond_FirstUseEver);
+        
+        ImGui::Begin("Entities", &showEntityList);
+        ImGui::Text("Count: %zu", state.map.entities.size());
+        ImGui::Separator();
+        
+        for (size_t i = 0; i < state.map.entities.size(); i++) {
+            const auto& ent = state.map.entities[i];
+            std::string label = ent.name.empty() 
+                ? std::string(GetEntityTypeName(ent.type)) + " #" + std::to_string(ent.id)
+                : ent.name;
+            
+            bool isSelected = (state.selectedEntityIndex == static_cast<int>(i));
+            if (ImGui::Selectable(label.c_str(), isSelected)) {
+                state.selectedEntityIndex = static_cast<int>(i);
+                state.selectedBrushIndex = -1;
+            }
+        }
+        ImGui::End();
+    }
+    
+    void RenderProperties() {
+        ImGui::SetNextWindowPos(ImVec2(1060, 30), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(210, 620), ImGuiCond_FirstUseEver);
+        
+        ImGui::Begin("Properties", &showProperties);
+        
+        // Map properties
+        if (ImGui::CollapsingHeader("Map", ImGuiTreeNodeFlags_DefaultOpen)) {
+            strncpy(mapNameBuffer, state.map.name.c_str(), sizeof(mapNameBuffer) - 1);
+            if (ImGui::InputText("Name", mapNameBuffer, sizeof(mapNameBuffer))) {
+                state.map.name = mapNameBuffer;
+                state.hasUnsavedChanges = true;
+            }
+            strncpy(authorBuffer, state.map.author.c_str(), sizeof(authorBuffer) - 1);
+            if (ImGui::InputText("Author", authorBuffer, sizeof(authorBuffer))) {
+                state.map.author = authorBuffer;
+                state.hasUnsavedChanges = true;
+            }
+        }
+        
+        // Grid settings
+        if (ImGui::CollapsingHeader("Grid", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Snap to Grid", &state.settings.snapToGrid);
+            ImGui::DragFloat("Grid Size", &state.settings.gridSize, 0.25f, 0.25f, 16.0f);
+            ImGui::DragFloat("Grid Height", &state.settings.gridHeight, 0.5f, -100.0f, 100.0f);
+            
+            const char* planes[] = { "XZ (Floor)", "XY (Front)", "YZ (Side)" };
+            int plane = static_cast<int>(state.settings.currentPlane);
+            if (ImGui::Combo("Plane", &plane, planes, 3)) {
+                state.settings.currentPlane = static_cast<GridPlane>(plane);
+            }
+        }
+        
+        // Brush properties
+        if (state.selectedBrushIndex >= 0 && 
+            state.selectedBrushIndex < static_cast<int>(state.map.brushes.size())) {
+            RenderBrushProperties();
+        }
+        
+        // Entity properties
+        if (state.selectedEntityIndex >= 0 && 
+            state.selectedEntityIndex < static_cast<int>(state.map.entities.size())) {
+            RenderEntityProperties();
+        }
+        
+        ImGui::End();
+    }
+    
+    void RenderBrushProperties() {
+        if (ImGui::CollapsingHeader("Brush", ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto& brush = state.map.brushes[state.selectedBrushIndex];
+            
+            strncpy(brushNameBuffer, brush.name.c_str(), sizeof(brushNameBuffer) - 1);
+            if (ImGui::InputText("Name##brush", brushNameBuffer, sizeof(brushNameBuffer))) {
+                brush.name = brushNameBuffer;
+                state.hasUnsavedChanges = true;
+            }
+            
+            ImGui::Text("Vertices: %zu", brush.vertices.size());
+            ImGui::Text("Triangles: %zu", brush.indices.size() / 3);
+            ImGui::ColorEdit3("Color", &brush.color.x);
+            
+            ImGui::Text("Flags:");
+            
+            #define FLAG_CHECKBOX(name, flag) \
+                { bool v = brush.flags & flag; \
+                if (ImGui::Checkbox(name, &v)) { \
+                    if (v) brush.flags |= flag; else brush.flags &= ~flag; \
+                    state.hasUnsavedChanges = true; } }
+            
+            FLAG_CHECKBOX("Solid", BRUSH_SOLID);
+            FLAG_CHECKBOX("Detail", BRUSH_DETAIL);
+            FLAG_CHECKBOX("Trigger", BRUSH_TRIGGER);
+            FLAG_CHECKBOX("Water", BRUSH_WATER);
+            FLAG_CHECKBOX("Lava", BRUSH_LAVA);
+            FLAG_CHECKBOX("Ladder", BRUSH_LADDER);
+            FLAG_CHECKBOX("Clip", BRUSH_CLIP);
+            FLAG_CHECKBOX("No Collide", BRUSH_NOCOLLIDE);
+            
+            #undef FLAG_CHECKBOX
+        }
+    }
+    
+    void RenderEntityProperties() {
+        if (ImGui::CollapsingHeader("Entity", ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto& ent = state.map.entities[state.selectedEntityIndex];
+            
+            strncpy(entityNameBuffer, ent.name.c_str(), sizeof(entityNameBuffer) - 1);
+            if (ImGui::InputText("Name##ent", entityNameBuffer, sizeof(entityNameBuffer))) {
+                ent.name = entityNameBuffer;
+                state.hasUnsavedChanges = true;
+            }
+            
+            ImGui::Text("Type: %s", GetEntityTypeName(ent.type));
+            
+            if (ImGui::DragFloat3("Position", &ent.position.x, 0.1f))
+                state.hasUnsavedChanges = true;
+            if (ImGui::DragFloat3("Rotation", &ent.rotation.x, 1.0f, -180.0f, 180.0f))
+                state.hasUnsavedChanges = true;
+            if (ImGui::DragFloat3("Scale", &ent.scale.x, 0.1f, 0.1f, 10.0f))
+                state.hasUnsavedChanges = true;
+            
+            ImGui::Separator();
+            RenderEntityTypeProperties(ent);
+        }
+    }
+    
+    void RenderEntityTypeProperties(Entity& ent) {
+        switch (ent.type) {
+            case ENT_LIGHT:
+            case ENT_LIGHT_SPOT:
+            case ENT_LIGHT_ENV: {
+                float color[3] = {
+                    std::stof(ent.GetProperty("color_r", "1")),
+                    std::stof(ent.GetProperty("color_g", "1")),
+                    std::stof(ent.GetProperty("color_b", "1"))
+                };
+                if (ImGui::ColorEdit3("Light Color", color)) {
+                    ent.SetProperty("color_r", std::to_string(color[0]));
+                    ent.SetProperty("color_g", std::to_string(color[1]));
+                    ent.SetProperty("color_b", std::to_string(color[2]));
+                    state.hasUnsavedChanges = true;
+                }
+                
+                float intensity = std::stof(ent.GetProperty("intensity", "1"));
+                if (ImGui::DragFloat("Intensity", &intensity, 0.1f, 0.0f, 100.0f)) {
+                    ent.SetProperty("intensity", std::to_string(intensity));
+                    state.hasUnsavedChanges = true;
+                }
+                
+                float radius = std::stof(ent.GetProperty("radius", "10"));
+                if (ImGui::DragFloat("Radius", &radius, 0.5f, 0.0f, 500.0f)) {
+                    ent.SetProperty("radius", std::to_string(radius));
+                    state.hasUnsavedChanges = true;
+                }
+                break;
+            }
+            
+            case ENT_TRIGGER_HURT: {
+                float damage = std::stof(ent.GetProperty("damage", "10"));
+                if (ImGui::DragFloat("Damage", &damage, 1.0f, 0.0f, 1000.0f)) {
+                    ent.SetProperty("damage", std::to_string(damage));
+                    state.hasUnsavedChanges = true;
+                }
+                break;
+            }
+            
+            case ENT_TRIGGER_PUSH: {
+                float force[3] = {
+                    std::stof(ent.GetProperty("force_x", "0")),
+                    std::stof(ent.GetProperty("force_y", "10")),
+                    std::stof(ent.GetProperty("force_z", "0"))
+                };
+                if (ImGui::DragFloat3("Push Force", force, 0.5f)) {
+                    ent.SetProperty("force_x", std::to_string(force[0]));
+                    ent.SetProperty("force_y", std::to_string(force[1]));
+                    ent.SetProperty("force_z", std::to_string(force[2]));
+                    state.hasUnsavedChanges = true;
+                }
+                break;
+            }
+            
+            case ENT_FUNC_DOOR: {
+                float moveDir[3] = {
+                    std::stof(ent.GetProperty("move_x", "0")),
+                    std::stof(ent.GetProperty("move_y", "3")),
+                    std::stof(ent.GetProperty("move_z", "0"))
+                };
+                if (ImGui::DragFloat3("Move Distance", moveDir, 0.1f)) {
+                    ent.SetProperty("move_x", std::to_string(moveDir[0]));
+                    ent.SetProperty("move_y", std::to_string(moveDir[1]));
+                    ent.SetProperty("move_z", std::to_string(moveDir[2]));
+                    state.hasUnsavedChanges = true;
+                }
+                
+                float speed = std::stof(ent.GetProperty("speed", "2"));
+                if (ImGui::DragFloat("Speed", &speed, 0.1f, 0.1f, 20.0f)) {
+                    ent.SetProperty("speed", std::to_string(speed));
+                    state.hasUnsavedChanges = true;
+                }
+                break;
+            }
+            
+            case ENT_ITEM_HEALTH:
+            case ENT_ITEM_ARMOR:
+            case ENT_ITEM_AMMO: {
+                int amount = std::stoi(ent.GetProperty("amount", "25"));
+                if (ImGui::DragInt("Amount", &amount, 1, 1, 200)) {
+                    ent.SetProperty("amount", std::to_string(amount));
+                    state.hasUnsavedChanges = true;
+                }
+                
+                float respawn = std::stof(ent.GetProperty("respawn_time", "30"));
+                if (ImGui::DragFloat("Respawn Time", &respawn, 1.0f, 0.0f, 300.0f)) {
+                    ent.SetProperty("respawn_time", std::to_string(respawn));
+                    state.hasUnsavedChanges = true;
+                }
+                break;
+            }
+            
+            default:
+                break;
+        }
+    }
+    
+    void RenderStatusBar() {
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | 
+                                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                                 ImGuiWindowFlags_NoBringToFrontOnFocus;
+        
+        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x, viewport->Pos.y + viewport->Size.y - 25));
+        ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, 25));
+        
+        ImGui::Begin("StatusBar", nullptr, flags);
+        
+        const char* toolNames[] = { "Select", "Move", "Rotate", "Scale", "Create Box", 
+                                    "Create Cylinder", "Create Wedge", "Place Entity", "Vertex Edit" };
+        ImGui::Text("Tool: %s", toolNames[static_cast<int>(state.currentTool)]);
+        
+        ImGui::SameLine(200);
+        ImGui::Text("Brushes: %zu | Entities: %zu", state.map.brushes.size(), state.map.entities.size());
+        
+        ImGui::SameLine(450);
+        ImGui::Text("Grid: %.2f", state.settings.gridSize);
+        
+        ImGui::SameLine(550);
+        if (state.hasUnsavedChanges) {
+            ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "* Unsaved");
+        } else {
+            ImGui::TextDisabled("Saved");
+        }
+        
+        ImGui::End();
+    }
+    
+    void PlaceEntity(EntityType type) {
+        state.entityToPlace = type;
+        state.currentTool = EditorTool::CREATE_ENTITY;
+    }
+    
+    void SaveMap() {
+        if (state.currentFilePath.empty()) {
+            state.currentFilePath = "map.pcd";
+        }
+        ExportPCD();
+    }
+    
+    void ExportPCD() {
+        std::string path = state.currentFilePath.empty() ? "map.pcd" : state.currentFilePath;
+        if (PCDWriter::Save(state.map, path)) {
+            state.hasUnsavedChanges = false;
+            state.currentFilePath = path;
+        }
+    }
+};
+
+} // namespace PCD
+
+#endif // PCD_EDITOR_UI_H
