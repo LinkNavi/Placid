@@ -1,117 +1,68 @@
-// LocalPlayer.h - Updated with Q3 movement
+// LocalPlayer.h - Fixed with proper includes
 
 #pragma once
 
-#include "Player.h"
-#include "PlayerController.h"
-#include "Network/NetworkManager.h"
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include "PCD/PCDTypes.h"
+#include <cstdint>
+#include <string>
 
-namespace Game {
+// Forward declarations
+namespace Network {
+    class NetworkManager;
+}
 
-class LocalPlayer : public Player {
+namespace Player {
+
+class LocalPlayer {
 private:
+    uint32_t playerId;
+    std::string playerName;
+    
     GLFWwindow* window;
-    PlayerController controller;
+    Network::NetworkManager* netManager;
+    
+    // Transform
+    glm::vec3 position;
+    glm::vec3 velocity;
+    float yaw;
+    float pitch;
+    
+    // Movement
+    float moveSpeed;
+    float jumpForce;
+    float gravity;
+    bool isGrounded;
+    
+    // Mouse
     bool cursorLocked;
     double lastMouseX, lastMouseY;
+    float mouseSensitivity;
     
-    Network::NetworkManager* netManager;
+    // Network
     float networkUpdateTimer;
     float networkUpdateInterval;
-    
-    PCD::Vec3 lastSentPosition;
+    glm::vec3 lastSentPosition;
     float lastSentYaw;
     float lastSentPitch;
 
 public:
-    LocalPlayer(uint32_t id, const std::string& name, GLFWwindow* win, Network::NetworkManager* net)
-        : Player(id, name)
-        , window(win)
-        , cursorLocked(true)
-        , lastMouseX(0)
-        , lastMouseY(0)
-        , netManager(net)
-        , networkUpdateTimer(0.0f)
-        , networkUpdateInterval(0.05f)
-        , lastSentPosition(0, 0, 0)
-        , lastSentYaw(0)
-        , lastSentPitch(0)
-    {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        glfwGetCursorPos(window, &lastMouseX, &lastMouseY);
-    }
+    LocalPlayer(uint32_t id, const std::string& name, GLFWwindow* win, Network::NetworkManager* net);
     
-    void Update(float deltaTime) override {
-        if (!isAlive) return;
-        
-        ProcessMouseInput(deltaTime);
-        controller.ProcessInput(window, deltaTime);
-        controller.Update(deltaTime);
-        
-        // Sync with Player base class
-        position = controller.position;
-        velocity = controller.velocity;
-        yaw = controller.yaw;
-        pitch = controller.pitch;
-        isGrounded = controller.isGrounded;
-        
-        // Send network updates
-        networkUpdateTimer += deltaTime;
-        if (networkUpdateTimer >= networkUpdateInterval) {
-            SendNetworkUpdate();
-            networkUpdateTimer = 0.0f;
-        }
-    }
+    void Update(float deltaTime);
+    void SetCursorLocked(bool locked);
     
-    void Render() override {
-        // Local player doesn't render itself (first-person)
-    }
-    
-    void SetCursorLocked(bool locked) {
-        cursorLocked = locked;
-        glfwSetInputMode(window, GLFW_CURSOR, 
-                        locked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-    }
-    
-    PCD::Vec3 GetEyePosition() const {
-        return controller.GetEyePosition();
-    }
-    
+    glm::vec3 GetPosition() const { return position; }
+    glm::vec3 GetViewDirection() const;
+    float GetYaw() const { return yaw; }
+    float GetPitch() const { return pitch; }
+
 private:
-    void ProcessMouseInput(float deltaTime) {
-        if (!cursorLocked) return;
-        
-        double mouseX, mouseY;
-        glfwGetCursorPos(window, &mouseX, &mouseY);
-        
-        double deltaX = mouseX - lastMouseX;
-        double deltaY = mouseY - lastMouseY;
-        
-        lastMouseX = mouseX;
-        lastMouseY = mouseY;
-        
-        controller.ProcessMouseInput(deltaX, deltaY);
-    }
-    
-    void SendNetworkUpdate() {
-        if (!netManager) return;
-        
-        float positionDelta = (position - lastSentPosition).Length();
-        float rotationDelta = std::abs(yaw - lastSentYaw) + std::abs(pitch - lastSentPitch);
-        
-        if (positionDelta > 0.01f || rotationDelta > 0.01f) {
-            netManager->SendPlayerState(
-                position.x, position.y, position.z,
-                yaw, pitch,
-                health, 0
-            );
-            
-            lastSentPosition = position;
-            lastSentYaw = yaw;
-            lastSentPitch = pitch;
-        }
-    }
+    void ProcessInput(float deltaTime);
+    void ProcessMouseInput(float deltaTime);
+    void UpdatePhysics(float deltaTime);
+    void SendNetworkUpdate();
 };
 
-} // namespace Game
+} // namespace Player

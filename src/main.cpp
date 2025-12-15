@@ -1,6 +1,6 @@
 // main.cpp - Fixed with proper includes
 
-#include <GL/gl.h>
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -10,6 +10,8 @@
 #include "Game/MainMenu.h"
 #include "Game/Lobby.h"
 #include "Game/GameScene.h"
+#include "Game/LocalPlayer.h"
+#include "Game/RemotePlayer.h"
 
 #include <iostream>
 #include <memory>
@@ -41,6 +43,12 @@ int main() {
     
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+    
+    // Load OpenGL with glad
+    if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
+        std::cerr << "Failed to initialize GLAD\n";
+        return -1;
+    }
     
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

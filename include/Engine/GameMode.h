@@ -1,6 +1,8 @@
+#include <glad/gl.h>
 #ifndef GAME_MODE_H
 #define GAME_MODE_H
 
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include "Camera.h"
 #include "Renderer.h"

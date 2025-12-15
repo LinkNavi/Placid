@@ -1,4 +1,4 @@
-// Lobby.h - Updated with map transfer support
+// Lobby.h - Fixed callback signature
 
 #pragma once
 
@@ -49,11 +49,10 @@ public:
             availableMaps.push_back("maps/test.pcd");
         }
         
+        // Fixed: Use correct callback signature (no fromIP, fromPort)
         netManager->SetMessageCallback([this](const std::string& msgType, 
-                                             const std::vector<std::string>& args,
-                                             const std::string& fromIP, 
-                                             uint16_t fromPort) {
-            if (msgType == Network::MessageType::CHAT_MESSAGE && args.size() >= 2) {
+                                              const std::vector<std::string>& args) {
+            if (msgType == "CHAT_MESSAGE" && args.size() >= 2) {
                 uint32_t senderId = std::stoul(args[0]);
                 std::string message = args[1];
                 
