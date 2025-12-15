@@ -1,185 +1,107 @@
 #include "Engine/GameMode.h"
 #include <iostream>
-#include <cmath>
 #include <algorithm>
 
 namespace Game {
 
 GameMode::GameMode(Renderer* r, const PCD::Map* m) 
-    : renderer(r), map(m), velocity(0, 0, 0), isGrounded(false), groundY(0) {
+    : renderer(r), map(m) {
 }
 
 GameMode::~GameMode() {
 }
 
 void GameMode::Initialize() {
-    // Find player spawn and teleport there
-    Vec3 spawnPos = FindPlayerSpawn();
-    camera.position = spawnPos;
-    camera.yaw = 0;
-    camera.pitch = 0;
+    PCD::Vec3 spawn = FindPlayerSpawn();
+    controller.position = spawn;
+    controller.velocity = PCD::Vec3(0, 0, 0);
+    controller.yaw = 0;
+    controller.pitch = 0;
     
-    velocity = Vec3(0, 0, 0);
-    isGrounded = false;
-    
-    std::cout << "Game mode initialized. Spawned at (" 
-              << spawnPos.x << ", " << spawnPos.y << ", " << spawnPos.z << ")\n";
+    std::cout << "Play mode: Spawned at (" << spawn.x << ", " << spawn.y << ", " << spawn.z << ")\n";
 }
 
-Vec3 GameMode::FindPlayerSpawn() {
-    // Look for player spawn entity
+PCD::Vec3 GameMode::FindPlayerSpawn() {
     for (const auto& ent : map->entities) {
         if (ent.type == PCD::ENT_INFO_PLAYER_START || 
             ent.type == PCD::ENT_INFO_PLAYER_DEATHMATCH) {
-            return Vec3(ent.position.x, ent.position.y + 1.6f, ent.position.z);
+            return PCD::Vec3(ent.position.x, ent.position.y, ent.position.z);
         }
     }
-    
-    // No spawn found, use default position above ground
-    return Vec3(0, 2.0f, 0);
+    return PCD::Vec3(0, 0, 0);
 }
 
 void GameMode::ProcessInput(GLFWwindow* window, float dt) {
-    // Get movement input
-    float forward = keybinds.GetAxis(KeybindManager::MOVE_FORWARD, KeybindManager::MOVE_BACKWARD);
-    float right = keybinds.GetAxis(KeybindManager::MOVE_RIGHT, KeybindManager::MOVE_LEFT);
-    
-    // Get movement vectors
-    Vec3 fwd = camera.GetForward();
-    Vec3 rgt = camera.GetRight();
-    
-    // Ground movement only (no flying)
-    fwd.y = 0;
-    fwd = fwd.normalized();
-    rgt.y = 0;
-    rgt = rgt.normalized();
-    
-    // Calculate desired velocity
-    float speed = keybinds.IsPressed(KeybindManager::SPRINT) ? SPRINT_SPEED : MOVE_SPEED;
-    Vec3 wishDir = fwd * forward + rgt * right;
-    
-    if (wishDir.x != 0 || wishDir.z != 0) {
-        wishDir = wishDir.normalized();
-    }
-    
-    // Apply movement force
-    if (isGrounded) {
-        velocity.x = wishDir.x * speed;
-        velocity.z = wishDir.z * speed;
-    } else {
-        // Air control (reduced)
-        velocity.x += wishDir.x * speed * 0.1f * dt;
-        velocity.z += wishDir.z * speed * 0.1f * dt;
-    }
-    
-    // Jump
-    if (keybinds.IsPressed(KeybindManager::JUMP) && isGrounded) {
-        velocity.y = JUMP_FORCE;
-        isGrounded = false;
-    }
+    controller.ProcessInput(window, dt);
 }
 
 void GameMode::Update(float dt) {
-    UpdatePhysics(dt);
-}
-
-void GameMode::UpdatePhysics(float dt) {
-    // Apply gravity
-    if (!isGrounded) {
-        velocity.y += GRAVITY * dt;
-    }
-    
-    // Apply drag
-    float drag = isGrounded ? GROUND_DRAG : AIR_DRAG;
-    velocity.x *= (1.0f - drag * dt);
-    velocity.z *= (1.0f - drag * dt);
-    
-    // Clamp velocity
-    float maxSpeed = 50.0f;
-    float speedXZ = std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
-    if (speedXZ > maxSpeed) {
-        float scale = maxSpeed / speedXZ;
-        velocity.x *= scale;
-        velocity.z *= scale;
-    }
-    
-    // Update position
-    camera.position.x += velocity.x * dt;
-    camera.position.y += velocity.y * dt;
-    camera.position.z += velocity.z * dt;
-    
-    // Simple ground collision
+    controller.Update(dt);
     CheckGroundCollision();
 }
 
 void GameMode::CheckGroundCollision() {
-    // Find the highest floor brush below player
-    float highestFloor = -1000.0f;
-    bool foundFloor = false;
+    float highest = -1000.0f;
+    bool found = false;
     
     for (const auto& brush : map->brushes) {
-        if (!(brush.flags & PCD::BRUSH_SOLID)) continue;
+        if (!(brush.flags & PCD::BRUSH_SOLID) || brush.vertices.empty()) continue;
         
-        // Get brush bounds
-        if (brush.vertices.empty()) continue;
-        
-        float minX = brush.vertices[0].position.x;
-        float maxX = minX;
-        float minZ = brush.vertices[0].position.z;
-        float maxZ = minZ;
-        float minY = brush.vertices[0].position.y;
-        float maxY = minY;
+        float minX = brush.vertices[0].position.x, maxX = minX;
+        float minZ = brush.vertices[0].position.z, maxZ = minZ;
+        float minY = brush.vertices[0].position.y, maxY = minY;
         
         for (const auto& v : brush.vertices) {
-            minX = std::min(minX, v.position.x);
-            maxX = std::max(maxX, v.position.x);
-            minY = std::min(minY, v.position.y);
-            maxY = std::max(maxY, v.position.y);
-            minZ = std::min(minZ, v.position.z);
-            maxZ = std::max(maxZ, v.position.z);
+            minX = std::min(minX, v.position.x); maxX = std::max(maxX, v.position.x);
+            minY = std::min(minY, v.position.y); maxY = std::max(maxY, v.position.y);
+            minZ = std::min(minZ, v.position.z); maxZ = std::max(maxZ, v.position.z);
         }
         
-        // Check if player is above this brush
-        if (camera.position.x >= minX && camera.position.x <= maxX &&
-            camera.position.z >= minZ && camera.position.z <= maxZ) {
-            
-            // This brush is under the player
-            if (maxY > highestFloor && maxY <= camera.position.y) {
-                highestFloor = maxY;
-                foundFloor = true;
-            }
+        if (controller.position.x >= minX && controller.position.x <= maxX &&
+            controller.position.z >= minZ && controller.position.z <= maxZ &&
+            maxY > highest && maxY <= controller.position.y) {
+            highest = maxY;
+            found = true;
         }
     }
     
-    // Check if we're on the ground
-    const float GROUND_THRESHOLD = 0.1f;
-    if (foundFloor && camera.position.y - highestFloor <= GROUND_THRESHOLD) {
-        camera.position.y = highestFloor;
-        velocity.y = 0;
-        isGrounded = true;
-        groundY = highestFloor;
-    } else {
-        isGrounded = false;
+    if (found && controller.position.y - highest <= 0.1f) {
+        controller.position.y = highest;
+        if (controller.velocity.y < 0) controller.velocity.y = 0;
+        controller.isGrounded = true;
+        controller.groundY = highest;
+    } else if (controller.position.y > 0.1f) {
+        controller.isGrounded = false;
     }
     
-    // Prevent falling through the world
-    if (camera.position.y < -10.0f) {
-        // Respawn at spawn point
-        Vec3 spawn = FindPlayerSpawn();
-        camera.position = spawn;
-        velocity = Vec3(0, 0, 0);
+    if (controller.position.y < -10.0f) {
+        controller.position = FindPlayerSpawn();
+        controller.velocity = PCD::Vec3(0, 0, 0);
     }
 }
 
 void GameMode::Render(float* projection) {
-    // Get view matrix
+    PCD::Vec3 eye = controller.GetEyePosition();
+    PCD::Vec3 fwd = controller.GetForward();
+    PCD::Vec3 target = eye + fwd;
+    PCD::Vec3 up(0, 1, 0);
+    
+    PCD::Vec3 f = (target - eye).Normalized();
+    
+    // Cross product: (f.y*up.z - f.z*up.y, f.z*up.x - f.x*up.z, f.x*up.y - f.y*up.x)
+    PCD::Vec3 r(f.y*up.z - f.z*up.y, f.z*up.x - f.x*up.z, f.x*up.y - f.y*up.x);
+    r = r.Normalized();
+    
+    // Cross product: r x f
+    PCD::Vec3 u(r.y*f.z - r.z*f.y, r.z*f.x - r.x*f.z, r.x*f.y - r.y*f.x);
+    
     float view[16];
-    camera.GetViewMatrix(view);
+    view[0] = r.x;  view[4] = r.y;  view[8] = r.z;   view[12] = -(r.x*eye.x + r.y*eye.y + r.z*eye.z);
+    view[1] = u.x;  view[5] = u.y;  view[9] = u.z;   view[13] = -(u.x*eye.x + u.y*eye.y + u.z*eye.z);
+    view[2] = -f.x; view[6] = -f.y; view[10] = -f.z; view[14] = f.x*eye.x + f.y*eye.y + f.z*eye.z;
+    view[3] = 0;    view[7] = 0;    view[11] = 0;    view[15] = 1;
     
-    // Render the map brushes (solid geometry only)
     renderer->RenderBrushes(map->brushes, -1, view, projection);
-    
-    // Don't render entities in play mode (or render as gameplay objects)
 }
 
 } // namespace Game

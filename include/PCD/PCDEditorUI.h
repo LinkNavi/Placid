@@ -1,10 +1,10 @@
 #ifndef PCD_EDITOR_UI_H
 #define PCD_EDITOR_UI_H
 
+#include "Engine/TextureLoader.h"
 #include "PCDBrushFactory.h"
 #include "PCDEditorState.h"
 #include "PCDFile.h"
-#include "Engine/TextureLoader.h"
 #include <algorithm>
 #include <cstring>
 #include <imgui.h>
@@ -202,93 +202,101 @@ private:
     }
   }
 
-void RenderToolbar() {
+  void RenderToolbar() {
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(80, 380), ImGuiCond_FirstUseEver);
-    
+
     ImGui::Begin("Tools", &showToolbar, ImGuiWindowFlags_NoResize);
-    
+
     ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Hotkeys:");
     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "1-5");
     ImGui::Separator();
-    
+
     ImVec4 activeColor(0.2f, 0.5f, 0.8f, 1.0f);
-    
+
     if (state.currentTool == PCD::EditorTool::SELECT) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("1-Select", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::SELECT;
+    if (ImGui::Button("1-Select", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::SELECT;
     if (state.currentTool == PCD::EditorTool::SELECT) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     if (state.currentTool == PCD::EditorTool::MOVE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("2-Move", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::MOVE;
+    if (ImGui::Button("2-Move", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::MOVE;
     if (state.currentTool == PCD::EditorTool::MOVE) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     if (state.currentTool == PCD::EditorTool::ROTATE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("3-Rotate", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::ROTATE;
+    if (ImGui::Button("3-Rotate", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::ROTATE;
     if (state.currentTool == PCD::EditorTool::ROTATE) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     if (state.currentTool == PCD::EditorTool::SCALE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("4-Scale", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::SCALE;
+    if (ImGui::Button("4-Scale", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::SCALE;
     if (state.currentTool == PCD::EditorTool::SCALE) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Create:");
-    
+
     if (state.currentTool == PCD::EditorTool::CREATE_BOX) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("5-Box (B)", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_BOX;
+    if (ImGui::Button("5-Box (B)", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::CREATE_BOX;
     if (state.currentTool == PCD::EditorTool::CREATE_BOX) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     if (state.currentTool == PCD::EditorTool::CREATE_CYLINDER) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("Cyl (C)", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_CYLINDER;
+    if (ImGui::Button("Cyl (C)", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::CREATE_CYLINDER;
     if (state.currentTool == PCD::EditorTool::CREATE_CYLINDER) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     if (state.currentTool == PCD::EditorTool::CREATE_WEDGE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("Wedge", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_WEDGE;
+    if (ImGui::Button("Wedge", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::CREATE_WEDGE;
     if (state.currentTool == PCD::EditorTool::CREATE_WEDGE) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     ImGui::Separator();
-    
+
     if (state.currentTool == PCD::EditorTool::CREATE_ENTITY) {
-        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+      ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
-    if (ImGui::Button("Entity", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_ENTITY;
+    if (ImGui::Button("Entity", ImVec2(60, 35)))
+      state.currentTool = PCD::EditorTool::CREATE_ENTITY;
     if (state.currentTool == PCD::EditorTool::CREATE_ENTITY) {
-        ImGui::PopStyleColor();
+      ImGui::PopStyleColor();
     }
-    
+
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Hold Shift:");
     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Constrain");
-    
+
     ImGui::End();
-}
+  }
 
   void RenderBrushList() {
     ImGui::SetNextWindowPos(ImVec2(10, 420), ImGuiCond_FirstUseEver);
@@ -342,94 +350,97 @@ void RenderToolbar() {
     ImGui::SetNextWindowSize(ImVec2(250, 360), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("Textures", &showTextures);
-    
+
     ImGui::Text("Texture Library");
     ImGui::Text("Count: %zu", state.map.textures.size());
     ImGui::Separator();
-    
+
     // Load texture button
     if (ImGui::Button("Load Texture...", ImVec2(230, 30))) {
       ImGui::OpenPopup("LoadTexture");
     }
-    
+
     // Load texture popup
     if (ImGui::BeginPopup("LoadTexture")) {
       ImGui::Text("Enter texture path:");
       ImGui::SetNextItemWidth(400);
-      if (ImGui::InputText("##texpath", texturePathBuffer, sizeof(texturePathBuffer), 
+      if (ImGui::InputText("##texpath", texturePathBuffer,
+                           sizeof(texturePathBuffer),
                            ImGuiInputTextFlags_EnterReturnsTrue)) {
         LoadTexture(texturePathBuffer);
         texturePathBuffer[0] = '\0';
         ImGui::CloseCurrentPopup();
       }
-      
+
       ImGui::Separator();
       ImGui::Text("Supported formats: PNG, JPG, BMP, TGA");
       ImGui::Text("Example: textures/wall.png");
-      
+
       if (ImGui::Button("Cancel")) {
         ImGui::CloseCurrentPopup();
       }
-      
+
       ImGui::EndPopup();
     }
-    
+
     ImGui::Spacing();
-    
+
     // Create checkerboard button
     if (ImGui::Button("Create Checkerboard", ImVec2(230, 25))) {
       Texture checker = TextureLoader::CreateCheckerboardTexture(64);
       state.map.AddTexture(checker);
       state.hasUnsavedChanges = true;
     }
-    
+
     ImGui::Separator();
-    
+
     // Texture list
     ImGui::BeginChild("TextureList", ImVec2(0, 0), true);
-    
-    for (auto& [id, tex] : state.map.textures) {
+
+    for (auto &[id, tex] : state.map.textures) {
       ImGui::PushID(id);
-      
+
       // Load OpenGL texture if not loaded
       if (tex.glTextureID == 0 && !tex.data.empty()) {
         tex.glTextureID = TextureLoader::CreateGLTexture(tex);
       }
-      
+
       // Show texture preview
       if (tex.glTextureID != 0) {
-        ImGui::Image((void*)(intptr_t)tex.glTextureID, ImVec2(64, 64));
+        ImGui::Image((void *)(intptr_t)tex.glTextureID, ImVec2(64, 64));
       } else {
         ImGui::Button("No Preview", ImVec2(64, 64));
       }
-      
+
       ImGui::SameLine();
       ImGui::BeginGroup();
-      
-      ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s", tex.name.c_str());
+
+      ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s",
+                         tex.name.c_str());
       ImGui::Text("ID: %u", tex.id);
       ImGui::Text("Size: %ux%u", tex.width, tex.height);
-      
+
       // Apply to selected brush button
-      if (state.selectedBrushIndex >= 0 && 
+      if (state.selectedBrushIndex >= 0 &&
           state.selectedBrushIndex < (int)state.map.brushes.size()) {
         if (ImGui::SmallButton("Apply to Brush")) {
           state.map.brushes[state.selectedBrushIndex].textureID = tex.id;
           state.hasUnsavedChanges = true;
         }
       }
-      
+
       ImGui::EndGroup();
-      
+
       ImGui::Separator();
       ImGui::PopID();
     }
-    
+
     if (state.map.textures.empty()) {
       ImGui::TextDisabled("No textures loaded");
-      ImGui::TextWrapped("Click 'Load Texture...' to add textures to your map.");
+      ImGui::TextWrapped(
+          "Click 'Load Texture...' to add textures to your map.");
     }
-    
+
     ImGui::EndChild();
     ImGui::End();
   }
@@ -528,18 +539,64 @@ void RenderToolbar() {
       // Texture settings
       ImGui::Separator();
       ImGui::Text("Texture:");
-      
+
       if (brush.textureID > 0) {
-        auto* tex = state.map.GetTexture(brush.textureID);
+        auto *tex = state.map.GetTexture(brush.textureID);
         if (tex) {
           ImGui::Text("  %s", tex->name.c_str());
           ImGui::Text("  ID: %u", tex->id);
-          
+
           if (ImGui::Button("Remove Texture")) {
             brush.textureID = 0;
             state.hasUnsavedChanges = true;
           }
-          
+          ImGui::Separator();
+          ImGui::Text("Texture Repeat:");
+
+          bool uvChanged = false;
+
+          if (ImGui::DragFloat("Repeat X", &brush.uvScaleX, 0.1f, 0.1f,
+                               20.0f)) {
+            uvChanged = true;
+          }
+          if (ImGui::SameLine(); ImGui::Button("Reset##X")) {
+            brush.uvScaleX = 1.0f;
+            uvChanged = true;
+          }
+
+          if (ImGui::DragFloat("Repeat Y", &brush.uvScaleY, 0.1f, 0.1f,
+                               20.0f)) {
+            uvChanged = true;
+          }
+          if (ImGui::SameLine(); ImGui::Button("Reset##Y")) {
+            brush.uvScaleY = 1.0f;
+            uvChanged = true;
+          }
+
+          ImGui::Separator();
+          ImGui::Text("Texture Offset:");
+
+          if (ImGui::DragFloat("Offset X", &brush.uvOffsetX, 0.05f, -10.0f,
+                               10.0f)) {
+            uvChanged = true;
+          }
+          if (ImGui::DragFloat("Offset Y", &brush.uvOffsetY, 0.05f, -10.0f,
+                               10.0f)) {
+            uvChanged = true;
+          }
+
+          if (uvChanged) {
+            state.hasUnsavedChanges = true;
+          }
+
+          if (ImGui::Button("Reset All UV", ImVec2(180, 25))) {
+            brush.uvScaleX = 1.0f;
+            brush.uvScaleY = 1.0f;
+            brush.uvOffsetX = 0.0f;
+            brush.uvOffsetY = 0.0f;
+            state.hasUnsavedChanges = true;
+          }
+
           ImGui::Separator();
           ImGui::Text("UV Transform:");
           if (ImGui::DragFloat("Scale X", &brush.uvScaleX, 0.1f, 0.1f, 10.0f)) {
@@ -548,10 +605,12 @@ void RenderToolbar() {
           if (ImGui::DragFloat("Scale Y", &brush.uvScaleY, 0.1f, 0.1f, 10.0f)) {
             state.hasUnsavedChanges = true;
           }
-          if (ImGui::DragFloat("Offset X", &brush.uvOffsetX, 0.1f, -10.0f, 10.0f)) {
+          if (ImGui::DragFloat("Offset X", &brush.uvOffsetX, 0.1f, -10.0f,
+                               10.0f)) {
             state.hasUnsavedChanges = true;
           }
-          if (ImGui::DragFloat("Offset Y", &brush.uvOffsetY, 0.1f, -10.0f, 10.0f)) {
+          if (ImGui::DragFloat("Offset Y", &brush.uvOffsetY, 0.1f, -10.0f,
+                               10.0f)) {
             state.hasUnsavedChanges = true;
           }
         } else {
@@ -704,9 +763,8 @@ void RenderToolbar() {
     ImGui::Text("%s", toolNames[static_cast<int>(state.currentTool)]);
 
     ImGui::SameLine(250);
-    ImGui::Text("| Brushes: %zu | Entities: %zu | Textures: %zu", 
-                state.map.brushes.size(),
-                state.map.entities.size(),
+    ImGui::Text("| Brushes: %zu | Entities: %zu | Textures: %zu",
+                state.map.brushes.size(), state.map.entities.size(),
                 state.map.textures.size());
 
     ImGui::SameLine(550);
@@ -753,8 +811,8 @@ void RenderToolbar() {
       state.currentFilePath = path;
     }
   }
-  
-  void LoadTexture(const std::string& path) {
+
+  void LoadTexture(const std::string &path) {
     Texture tex;
     if (TextureLoader::LoadImage(path, tex)) {
       state.map.AddTexture(tex);

@@ -1,7 +1,8 @@
-// Enhanced EditorApp.cpp with Unity-like camera controls
+// Enhanced EditorApp.cpp with Unity-like camera controls and texture loading
 
 #include "Engine/EditorApp.h"
 #include "Engine/GameMode.h"
+#include "Engine/TextureLoader.h"
 #include <glad/gl.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -81,7 +82,7 @@ bool EditorApp::Initialize(int width, int height, const char* title) {
     
     mapEditor = new MapEditor();
     
-    // Create default floor if map is empty
+    // Create default floor
     if (mapEditor->GetMap().brushes.empty()) {
         PCD::Brush floor = mapEditor->CreateBox(
             PCD::Vec3(-20, -1, -20),
@@ -98,6 +99,9 @@ bool EditorApp::Initialize(int width, int height, const char* title) {
         spawn.name = "PlayerSpawn";
         mapEditor->GetMap().entities.push_back(spawn);
     }
+    
+    // Load textures for the map
+    TextureLoader::LoadMapTextures(mapEditor->GetMap());
     
     return true;
 }
@@ -120,6 +124,10 @@ void EditorApp::Run() {
 }
 
 void EditorApp::Shutdown() {
+    if (mapEditor) {
+        TextureLoader::FreeMapTextures(mapEditor->GetMap());
+    }
+    
     delete gameMode;
     delete mapEditor;
     delete renderer;
@@ -142,13 +150,11 @@ void EditorApp::ProcessInput(float dt) {
         return;
     }
     
-    // Check modifier keys
     shiftPressed = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ||
                    (glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
     isAltPressed = (glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS) ||
                    (glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS);
     
-    // Camera movement (only when not hovering UI)
     ImGuiIO& io = ImGui::GetIO();
     if (!io.WantCaptureMouse && !io.WantCaptureKeyboard && cameraMode == CameraMode::FREE) {
         float speed = cameraMoveSpeed * (shiftPressed ? 2.0f : 1.0f);
@@ -156,7 +162,6 @@ void EditorApp::ProcessInput(float dt) {
         Vec3 forward = GetCameraForward();
         Vec3 right = GetCameraRight();
         
-        // Ground-aligned movement
         forward.y = 0;
         forward = forward.normalized();
         right.y = 0;
@@ -184,7 +189,6 @@ void EditorApp::ProcessInput(float dt) {
 }
 
 void EditorApp::UpdateCamera(float dt) {
-    // Calculate camera position from focus point, distance, and rotation
     cameraPosition.x = cameraFocusPoint.x + cameraDistance * sin(cameraYaw) * cos(cameraPitch);
     cameraPosition.y = cameraFocusPoint.y + cameraDistance * sin(cameraPitch);
     cameraPosition.z = cameraFocusPoint.z + cameraDistance * cos(cameraYaw) * cos(cameraPitch);
@@ -206,7 +210,6 @@ void EditorApp::OrbitCamera(float deltaX, float deltaY) {
     cameraYaw -= deltaX * cameraRotateSpeed;
     cameraPitch += deltaY * cameraRotateSpeed;
     
-    // Clamp pitch
     const float maxPitch = 1.5f;
     if (cameraPitch > maxPitch) cameraPitch = maxPitch;
     if (cameraPitch < -maxPitch) cameraPitch = -maxPitch;
@@ -257,7 +260,15 @@ void EditorApp::Render() {
         float aspect = (float)width / height;
         
         float proj[16];
-        gameMode->GetCamera().GetProjectionMatrix(proj, aspect);
+        float fov = 75.0f * 3.14159f / 180.0f;
+        float f = 1.0f / tan(fov / 2.0f);
+        float near = 0.1f, far = 1000.0f;
+        
+        proj[0] = f/aspect; proj[4] = 0; proj[8] = 0;                      proj[12] = 0;
+        proj[1] = 0;        proj[5] = f; proj[9] = 0;                      proj[13] = 0;
+        proj[2] = 0;        proj[6] = 0; proj[10] = (far+near)/(near-far); proj[14] = (2*far*near)/(near-far);
+        proj[3] = 0;        proj[7] = 0; proj[11] = -1;                    proj[15] = 0;
+        
         gameMode->Render(proj);
         
         ImGui_ImplOpenGL3_NewFrame();
@@ -294,7 +305,6 @@ void EditorApp::Render() {
     
     GetEditorViewMatrix(view);
     
-    // Projection matrix
     float f = 1.0f / tan(cameraFOV * 3.14159f / 360.0f);
     float near = 0.1f, far = 1000.0f;
     
@@ -342,6 +352,10 @@ void EditorApp::GetEditorViewMatrix(float* mat) {
 
 void EditorApp::EnterPlayMode() {
     std::cout << "Entering play mode...\n";
+    
+    // Load textures before starting play mode
+    TextureLoader::LoadMapTextures(mapEditor->GetMap());
+    
     currentMode = EditorMode::PLAY;
     gameMode = new Game::GameMode(renderer, &mapEditor->GetMap());
     gameMode->Initialize();
@@ -381,40 +395,34 @@ void EditorApp::KeyCallback(GLFWwindow* window, int key, int scancode, int actio
             return;
         }
         
-        if (app->currentMode == EditorMode::PLAY && app->gameMode) {
-            app->gameMode->GetKeybinds().OnKeyEvent(key, action);
-            return;
-        }
-        
-        if (!app->mapEditor) return;
-        
-        ImGuiIO& io = ImGui::GetIO();
-        if (io.WantCaptureKeyboard) return;
-        
-        // F key to frame selection
-        if (key == GLFW_KEY_F) {
-            app->FocusOnSelection();
-        }
-        
-        if (mods & GLFW_MOD_CONTROL) {
-            if (key == GLFW_KEY_N) app->mapEditor->NewMap();
-            if (key == GLFW_KEY_S) app->mapEditor->SaveMap();
-            if (key == GLFW_KEY_Z) app->mapEditor->Undo();
-            if (key == GLFW_KEY_Y) app->mapEditor->Redo();
-            if (key == GLFW_KEY_D) app->mapEditor->DuplicateSelected();
-            if (key == GLFW_KEY_A) app->mapEditor->SelectAll();
-        } else {
-            if (key == GLFW_KEY_1) app->mapEditor->SetTool(PCD::EditorTool::SELECT);
-            if (key == GLFW_KEY_2) app->mapEditor->SetTool(PCD::EditorTool::MOVE);
-            if (key == GLFW_KEY_3) app->mapEditor->SetTool(PCD::EditorTool::ROTATE);
-            if (key == GLFW_KEY_4) app->mapEditor->SetTool(PCD::EditorTool::SCALE);
-            if (key == GLFW_KEY_5) app->mapEditor->SetTool(PCD::EditorTool::CREATE_BOX);
+        if (app->currentMode == EditorMode::EDIT && app->mapEditor) {
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.WantCaptureKeyboard) return;
             
-            if (key == GLFW_KEY_DELETE) app->mapEditor->DeleteSelected();
-            if (key == GLFW_KEY_ESCAPE) app->mapEditor->DeselectAll();
+            if (key == GLFW_KEY_F) {
+                app->FocusOnSelection();
+            }
             
-            if (key == GLFW_KEY_B) app->mapEditor->SetTool(PCD::EditorTool::CREATE_BOX);
-            if (key == GLFW_KEY_C) app->mapEditor->SetTool(PCD::EditorTool::CREATE_CYLINDER);
+            if (mods & GLFW_MOD_CONTROL) {
+                if (key == GLFW_KEY_N) app->mapEditor->NewMap();
+                if (key == GLFW_KEY_S) app->mapEditor->SaveMap();
+                if (key == GLFW_KEY_Z) app->mapEditor->Undo();
+                if (key == GLFW_KEY_Y) app->mapEditor->Redo();
+                if (key == GLFW_KEY_D) app->mapEditor->DuplicateSelected();
+                if (key == GLFW_KEY_A) app->mapEditor->SelectAll();
+            } else {
+                if (key == GLFW_KEY_1) app->mapEditor->SetTool(PCD::EditorTool::SELECT);
+                if (key == GLFW_KEY_2) app->mapEditor->SetTool(PCD::EditorTool::MOVE);
+                if (key == GLFW_KEY_3) app->mapEditor->SetTool(PCD::EditorTool::ROTATE);
+                if (key == GLFW_KEY_4) app->mapEditor->SetTool(PCD::EditorTool::SCALE);
+                if (key == GLFW_KEY_5) app->mapEditor->SetTool(PCD::EditorTool::CREATE_BOX);
+                
+                if (key == GLFW_KEY_DELETE) app->mapEditor->DeleteSelected();
+                if (key == GLFW_KEY_ESCAPE) app->mapEditor->DeselectAll();
+                
+                if (key == GLFW_KEY_B) app->mapEditor->SetTool(PCD::EditorTool::CREATE_BOX);
+                if (key == GLFW_KEY_C) app->mapEditor->SetTool(PCD::EditorTool::CREATE_CYLINDER);
+            }
         }
     }
 }
@@ -432,11 +440,9 @@ void EditorApp::MouseButtonCallback(GLFWwindow* window, int button, int action, 
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
             if (app->isAltPressed) {
-                // Alt+Left = Orbit mode
                 app->cameraMode = CameraMode::ORBIT;
                 app->isLeftDragging = true;
             } else {
-                // Normal left click - selection/manipulation
                 app->dragAccumX = 0;
                 app->dragAccumZ = 0;
                 app->isLeftDragging = true;
@@ -511,7 +517,7 @@ void EditorApp::MouseCallback(GLFWwindow* window, double xpos, double ypos) {
     app->lastY = ypos;
     
     if (app->currentMode == EditorMode::PLAY && app->gameMode) {
-        app->gameMode->GetCamera().ProcessMouse(dx, dy);
+        app->gameMode->GetController().ProcessMouseInput(dx, dy);
         return;
     }
     
@@ -519,22 +525,18 @@ void EditorApp::MouseCallback(GLFWwindow* window, double xpos, double ypos) {
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
         
-        // Right-click rotate (orbit)
         if (app->isRightDragging) {
             app->OrbitCamera(dx, dy);
         }
         
-        // Middle-click pan
         if (app->isMiddleDragging || app->cameraMode == CameraMode::PAN) {
             app->PanCamera(dx, dy);
         }
         
-        // Alt+Left orbit
         if (app->cameraMode == CameraMode::ORBIT && app->isLeftDragging) {
             app->OrbitCamera(dx, dy);
         }
         
-        // Drag for manipulation
         if (app->mapEditor && app->isLeftDragging && app->cameraMode == CameraMode::FREE) {
             float moveScale = app->cameraDistance * 0.005f;
             
@@ -543,12 +545,11 @@ void EditorApp::MouseCallback(GLFWwindow* window, double xpos, double ypos) {
             forward.y = 0;
             forward = forward.normalized();
             
-float invDX = -dx;
-float invDY = -dy;
+            float invDX = -dx;
+            float invDY = -dy;
          
-float worldDX = (invDX * right.x - invDY * forward.x) * moveScale;
-float worldDZ = (invDX * right.z - invDY * forward.z) * moveScale;
-
+            float worldDX = (invDX * right.x - invDY * forward.x) * moveScale;
+            float worldDZ = (invDX * right.z - invDY * forward.z) * moveScale;
             
             app->dragAccumX += worldDX;
             app->dragAccumZ += worldDZ;

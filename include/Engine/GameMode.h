@@ -1,35 +1,19 @@
-#include <glad/gl.h>
 #ifndef GAME_MODE_H
 #define GAME_MODE_H
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
-#include "Camera.h"
+#include "Game/PlayerController.h"
 #include "Renderer.h"
 #include "PCD/PCD.h"
-#include "Game/KeybindManager.h"
 
 namespace Game {
 
 class GameMode {
 private:
-    Camera camera;
-    KeybindManager keybinds;
+    PlayerController controller;
     Renderer* renderer;
     const PCD::Map* map;
-    
-    // Player state
-    Vec3 velocity;
-    bool isGrounded;
-    float groundY;
-    
-    // Physics constants
-    const float GRAVITY = -20.0f;
-    const float JUMP_FORCE = 8.0f;
-    const float MOVE_SPEED = 5.0f;
-    const float SPRINT_SPEED = 10.0f;
-    const float GROUND_DRAG = 10.0f;
-    const float AIR_DRAG = 1.0f;
     
 public:
     GameMode(Renderer* r, const PCD::Map* m);
@@ -40,13 +24,11 @@ public:
     void Update(float dt);
     void Render(float* projection);
     
-    Camera& GetCamera() { return camera; }
-    KeybindManager& GetKeybinds() { return keybinds; }
+    PlayerController& GetController() { return controller; }
     
 private:
-    void UpdatePhysics(float dt);
+    PCD::Vec3 FindPlayerSpawn();
     void CheckGroundCollision();
-    Vec3 FindPlayerSpawn();
 };
 
 } // namespace Game
