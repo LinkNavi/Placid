@@ -1,4 +1,4 @@
-// test_network.cpp - Fixed to work with updated NetworkManager
+// test_network.cpp - Fixed for ENet NetworkManager
 
 #include "Network/NetworkManager.h"
 #include <iostream>
@@ -19,7 +19,7 @@ void PrintHelp() {
 }
 
 void RunHost(uint16_t port) {
-    Network::ENetNetworkManager net;
+    Network::NetworkManager net;
     
     std::cout << "\n=== HOST MODE ===\n";
     if (!net.HostGame(port, "Host")) {
@@ -47,19 +47,29 @@ void RunHost(uint16_t port) {
         std::cout.flush();
     });
     
-    net.SetMessageCallback([&net](const std::string& msgType, const std::vector<std::string>& args,
-                              const std::string& fromIP, uint16_t fromPort) {
-        // Filter out system messages
-        if (msgType == Network::MessageType::PING_REQUEST || 
-            msgType == Network::MessageType::PING_RESPONSE ||
-            msgType == Network::MessageType::PLAYER_STATE ||
-            msgType.empty()) {
+    net.SetMessageCallback([&net](const std::string& msgType, const std::vector<std::string>& args) {
+        // Filter out state updates (too spammy)
+        if (msgType == "PLAYER_STATE") {
             return;
         }
         
         // Display other messages
-        if (!msgType.empty() && msgType != Network::MessageType::CHAT_MESSAGE) {
-            std::cout << "\n>>> Received message: " << msgType << "\n> ";
+        if (msgType == "CHAT_MESSAGE" && args.size() >= 2) {
+            uint32_t senderId = std::stoul(args[0]);
+            std::string message = args[1];
+            
+            std::string senderName = "Unknown";
+            const auto& clients = net.GetClients();
+            auto it = clients.find(senderId);
+            if (it != clients.end()) {
+                senderName = it->second.name;
+            }
+            
+            std::cout << "\n[" << senderName << "] " << message << "\n> ";
+            std::cout.flush();
+        }
+        else if (!msgType.empty()) {
+            std::cout << "\n>>> Received: " << msgType << "\n> ";
             std::cout.flush();
         }
     });
@@ -182,22 +192,32 @@ void RunClient(const std::string& hostIP, uint16_t port) {
         std::cout.flush();
     });
     
-    net.SetMessageCallback([&net](const std::string& msgType, const std::vector<std::string>& args,
-                              const std::string& fromIP, uint16_t fromPort) {
-        // Filter system messages
-        if (msgType == Network::MessageType::PING_REQUEST || 
-            msgType == Network::MessageType::PING_RESPONSE ||
-            msgType == Network::MessageType::PLAYER_STATE ||
-            msgType.empty()) {
+    net.SetMessageCallback([&net](const std::string& msgType, const std::vector<std::string>& args) {
+        // Filter state updates
+        if (msgType == "PLAYER_STATE") {
             return;
         }
         
-        if (msgType == Network::MessageType::GAME_START && !args.empty()) {
+        if (msgType == "GAME_START" && !args.empty()) {
             std::cout << "\n>>> GAME STARTING - Map: " << args[0] << "\n> ";
             std::cout.flush();
         }
-        else if (!msgType.empty() && msgType != Network::MessageType::CHAT_MESSAGE) {
-            std::cout << "\n>>> Received message: " << msgType << "\n> ";
+        else if (msgType == "CHAT_MESSAGE" && args.size() >= 2) {
+            uint32_t senderId = std::stoul(args[0]);
+            std::string message = args[1];
+            
+            std::string senderName = "Unknown";
+            const auto& clients = net.GetClients();
+            auto it = clients.find(senderId);
+            if (it != clients.end()) {
+                senderName = it->second.name;
+            }
+            
+            std::cout << "\n[" << senderName << "] " << message << "\n> ";
+            std::cout.flush();
+        }
+        else if (!msgType.empty()) {
+            std::cout << "\n>>> Received: " << msgType << "\n> ";
             std::cout.flush();
         }
     });

@@ -1,18 +1,19 @@
-// GameScene.h - Main game scene with map and players
+// GameScene.h - Fixed for ENet NetworkManager
 
 #pragma once
 
-#include "Player.h"
-#include "LocalPlayer.h"
-#include "RemotePlayer.h"
-#include "Network/NetworkManager.h"
-#include "PCD/PCDTypes.h"
-#include <GL/gl.h>
 #include <GLFW/glfw3.h>
-#include <unordered_map>
+#include "Network/NetworkManager.h"
+#include "Engine/Renderer.h"
+#include "Game/LocalPlayer.h"
+#include "Game/RemotePlayer.h"
+#include "PCD/PCD.h"
+
 #include <memory>
+#include <unordered_map>
 #include <string>
 #include <vector>
+#include <iostream>
 
 namespace Game {
 
@@ -21,87 +22,131 @@ private:
     GLFWwindow* window;
     Network::NetworkManager* netManager;
     
-    // Players
-    std::unique_ptr<LocalPlayer> localPlayer;
-    std::unordered_map<uint32_t, std::unique_ptr<RemotePlayer>> remotePlayers;
+    std::unique_ptr<Rendering::Renderer> renderer;
+    std::unique_ptr<Player::LocalPlayer> localPlayer;
+    std::unordered_map<uint32_t, std::unique_ptr<Player::RemotePlayer>> remotePlayers;
     
-    // Map data (simple for now)
-    struct MapGeometry {
-        std::vector<float> vertices;
-        std::vector<uint32_t> indices;
-    };
-    MapGeometry mapGeometry;
-    std::string mapName;
+    PCD::Map currentMap;
+    bool isRunning;
+    bool cursorCaptured;
     
-    // Camera
-    PCD::Vec3 cameraPosition;
-    float cameraYaw;
-    float cameraPitch;
-    
-    // Game state
-    bool isActive;
-    bool showScoreboard;
+    // Stats
+    float frameTime;
+    int fps;
+    float fpsTimer;
+    int frameCount;
 
 public:
     GameScene(GLFWwindow* win, Network::NetworkManager* net)
-        : window(win)
-        , netManager(net)
-        , cameraPosition(0, 0, 0)
-        , cameraYaw(0)
-        , cameraPitch(0)
-        , isActive(false)
-        , showScoreboard(false)
+        : window(win), netManager(net), isRunning(false)
+        , cursorCaptured(false), frameTime(0), fps(0)
+        , fpsTimer(0), frameCount(0)
     {
-        // Set up network callbacks
-        netManager->SetPlayerJoinCallback([this](uint32_t playerId, const std::string& name) {
-            OnPlayerJoined(playerId, name);
+        renderer = std::make_unique<Rendering::Renderer>();
+        
+        // Setup network callbacks
+        netManager->SetMessageCallback([this](const std::string& type, const std::vector<std::string>& args) {
+            this->HandleNetworkMessage(type, args);
         });
         
-        netManager->SetPlayerLeaveCallback([this](uint32_t playerId) {
-            OnPlayerLeft(playerId);
+        netManager->SetPlayerJoinCallback([this](uint32_t id, const std::string& name) {
+            this->OnPlayerJoin(id, name);
         });
         
-        netManager->SetMessageCallback([this](const std::string& msgType,
-                                             const std::vector<std::string>& args,
-                                             const std::string& fromIP,
-                                             uint16_t fromPort) {
-            HandleNetworkMessage(msgType, args);
+        netManager->SetPlayerLeaveCallback([this](uint32_t id) {
+            this->OnPlayerLeave(id);
         });
     }
     
-    void Start(const std::string& map) {
-        mapName = map;
-        isActive = true;
+    void Start(const std::string& mapName) {
+        std::cout << "[GAME] Starting game with map: " << mapName << "\n";
         
         // Load map
-        LoadMap(map);
-        
-        // Create local player
-        uint32_t localId = netManager->GetLocalPlayerId();
-        const auto& clients = netManager->GetClients();
-        auto it = clients.find(localId);
-        std::string playerName = "Player";
-        if (it != clients.end()) {
-            playerName = it->second.name;
-        }
-        
-        localPlayer = std::make_unique<LocalPlayer>(localId, playerName, window, netManager);
-        
-        // Spawn at origin for now
-        localPlayer->position = PCD::Vec3(0, 2, 0);
-        
-        // Create remote players for everyone already in lobby
-        for (const auto& [id, client] : clients) {
-            if (id != localId) {
-                OnPlayerJoined(id, client.name);
+        if (netManager->IsHost()) {
+            if (!netManager->LoadMap(mapName)) {
+                std::cerr << "[GAME] Failed to load map\n";
+                return;
             }
         }
         
-        std::cout << "[GAME] Started game on map: " << map << "\n";
+        currentMap = netManager->GetMap();
+        
+        if (currentMap.brushes.empty()) {
+            std::cerr << "[GAME] Map has no geometry\n";
+            return;
+        }
+        
+        std::cout << "[GAME] Map loaded: " << currentMap.brushes.size() << " brushes\n";
+        
+        // Initialize renderer
+        renderer->SetMap(currentMap);
+        
+        // Find spawn point
+        glm::vec3 spawnPos(0.0f, 5.0f, 0.0f);
+        for (const auto& entity : currentMap.entities) {
+            if (entity.classname == "info_player_start") {
+                auto it = entity.properties.find("origin");
+                if (it != entity.properties.end()) {
+                    // Parse "x y z"
+                    std::stringstream ss(it->second);
+                    ss >> spawnPos.x >> spawnPos.y >> spawnPos.z;
+                    break;
+                }
+            }
+        }
+        
+        // Create local player
+        localPlayer = std::make_unique<Player::LocalPlayer>(
+            window, 
+            netManager,
+            spawnPos
+        );
+        
+        std::cout << "[GAME] Spawning at: " 
+                  << spawnPos.x << ", " << spawnPos.y << ", " << spawnPos.z << "\n";
+        
+        // Create remote players for existing clients
+        for (const auto& [id, client] : netManager->GetClients()) {
+            if (id != netManager->GetLocalPlayerId()) {
+                OnPlayerJoin(id, client.name);
+            }
+        }
+        
+        // Capture cursor
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        cursorCaptured = true;
+        
+        isRunning = true;
+        std::cout << "[GAME] Game started!\n";
+    }
+    
+    void Stop() {
+        isRunning = false;
+        
+        if (cursorCaptured) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            cursorCaptured = false;
+        }
+        
+        localPlayer.reset();
+        remotePlayers.clear();
+        
+        std::cout << "[GAME] Game stopped\n";
     }
     
     void Update(float deltaTime) {
-        if (!isActive) return;
+        if (!isRunning) return;
+        
+        frameTime = deltaTime;
+        
+        // Update FPS counter
+        frameCount++;
+        fpsTimer += deltaTime;
+        if (fpsTimer >= 1.0f) {
+            fps = frameCount;
+            frameCount = 0;
+            fpsTimer = 0.0f;
+        }
         
         // Update network
         netManager->Update(deltaTime);
@@ -109,11 +154,6 @@ public:
         // Update local player
         if (localPlayer) {
             localPlayer->Update(deltaTime);
-            
-            // Update camera from local player
-            cameraPosition = localPlayer->GetEyePosition();
-            cameraYaw = localPlayer->yaw;
-            cameraPitch = localPlayer->pitch;
         }
         
         // Update remote players
@@ -121,120 +161,136 @@ public:
             player->Update(deltaTime);
         }
         
-        // Check for ESC to show scoreboard
+        // Toggle cursor with ESC
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            // TODO: Show pause menu
-        }
-        
-        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
-            showScoreboard = true;
+            static bool escPressed = false;
+            if (!escPressed) {
+                cursorCaptured = !cursorCaptured;
+                glfwSetInputMode(window, GLFW_CURSOR, 
+                    cursorCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+                escPressed = true;
+            }
         } else {
-            showScoreboard = false;
+            static bool escPressed = false;
+            escPressed = false;
         }
     }
     
     void Render() {
-        if (!isActive) return;
+        if (!isRunning || !localPlayer) return;
         
-        // Clear screen
+        // Clear
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
-        // Set up camera
-        SetupCamera();
+        // Setup camera from local player
+        glm::vec3 camPos = localPlayer->GetPosition();
+        camPos.y += 1.6f; // Eye height
+        
+        glm::vec3 camDir = localPlayer->GetViewDirection();
+        
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+        float aspect = (float)width / height;
+        
+        renderer->SetCamera(camPos, camDir, aspect);
         
         // Render map
-        RenderMap();
+        renderer->RenderMap();
         
-        // Render all remote players
-        for (auto& [id, player] : remotePlayers) {
-            player->Render();
+        // Render players
+        if (localPlayer) {
+            renderer->RenderPlayer(
+                localPlayer->GetPosition(),
+                localPlayer->GetYaw(),
+                glm::vec3(0.2f, 0.5f, 1.0f) // Blue for local
+            );
         }
         
-        // Render HUD (in 2D)
+        for (const auto& [id, player] : remotePlayers) {
+            renderer->RenderPlayer(
+                player->GetPosition(),
+                player->GetYaw(),
+                glm::vec3(1.0f, 0.2f, 0.2f) // Red for remote
+            );
+        }
+        
+        // Render HUD
         RenderHUD();
     }
     
-    void Stop() {
-        isActive = false;
-        localPlayer.reset();
-        remotePlayers.clear();
-        std::cout << "[GAME] Stopped game\n";
-    }
-    
-    bool IsActive() const { return isActive; }
+    bool IsRunning() const { return isRunning; }
 
 private:
-    void SetupCamera() {
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        
-        // Perspective projection
-        int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
-        float aspect = (float)width / (float)height;
-        float fov = 90.0f;
-        float near = 0.1f;
-        float far = 1000.0f;
-        
-        float f = 1.0f / std::tan(fov * 3.14159f / 360.0f);
-        float mat[16] = {
-            f/aspect, 0, 0, 0,
-            0, f, 0, 0,
-            0, 0, (far+near)/(near-far), -1,
-            0, 0, (2*far*near)/(near-far), 0
-        };
-        glMultMatrixf(mat);
-        
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        
-        // Apply camera rotation
-        glRotatef(-cameraPitch * 180.0f / 3.14159f, 1, 0, 0);
-        glRotatef(-cameraYaw * 180.0f / 3.14159f, 0, 1, 0);
-        
-        // Apply camera position
-        glTranslatef(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z);
+    void HandleNetworkMessage(const std::string& msgType, const std::vector<std::string>& args) {
+        // Handle PLAYER_STATE messages
+        if (msgType == "PLAYER_STATE" && args.size() >= 8) {
+            uint32_t playerId = std::stoul(args[0]);
+            
+            // Skip our own updates
+            if (playerId == netManager->GetLocalPlayerId()) {
+                return;
+            }
+            
+            // Update remote player
+            auto it = remotePlayers.find(playerId);
+            if (it != remotePlayers.end()) {
+                float x = std::stof(args[1]);
+                float y = std::stof(args[2]);
+                float z = std::stof(args[3]);
+                float yaw = std::stof(args[4]);
+                float pitch = std::stof(args[5]);
+                
+                it->second->SetPosition(glm::vec3(x, y, z));
+                it->second->SetRotation(yaw, pitch);
+            }
+        }
+        // Handle CHAT_MESSAGE
+        else if (msgType == "CHAT_MESSAGE" && args.size() >= 2) {
+            uint32_t senderId = std::stoul(args[0]);
+            std::string message = args[1];
+            
+            // Find sender name
+            std::string senderName = "Unknown";
+            const auto& clients = netManager->GetClients();
+            auto it = clients.find(senderId);
+            if (it != clients.end()) {
+                senderName = it->second.name;
+            }
+            
+            std::cout << "[CHAT] " << senderName << ": " << message << "\n";
+        }
+        // Handle GAME_START
+        else if (msgType == "GAME_START" && args.size() >= 1) {
+            std::string mapName = args[0];
+            std::cout << "[GAME] Host started game with map: " << mapName << "\n";
+        }
     }
     
-    void RenderMap() {
-        if (mapGeometry.vertices.empty()) {
-            // Render simple ground plane if no map loaded
-            glColor3f(0.3f, 0.3f, 0.3f);
-            glBegin(GL_QUADS);
-            glVertex3f(-100, 0, -100);
-            glVertex3f(100, 0, -100);
-            glVertex3f(100, 0, 100);
-            glVertex3f(-100, 0, 100);
-            glEnd();
-            
-            // Draw grid
-            glColor3f(0.5f, 0.5f, 0.5f);
-            glBegin(GL_LINES);
-            for (int i = -10; i <= 10; i++) {
-                glVertex3f(i * 10, 0, -100);
-                glVertex3f(i * 10, 0, 100);
-                glVertex3f(-100, 0, i * 10);
-                glVertex3f(100, 0, i * 10);
-            }
-            glEnd();
-        } else {
-            // Render actual map geometry
-            glColor3f(0.7f, 0.7f, 0.7f);
-            glBegin(GL_TRIANGLES);
-            for (size_t i = 0; i < mapGeometry.indices.size(); i++) {
-                uint32_t idx = mapGeometry.indices[i];
-                glVertex3f(
-                    mapGeometry.vertices[idx * 3 + 0],
-                    mapGeometry.vertices[idx * 3 + 1],
-                    mapGeometry.vertices[idx * 3 + 2]
-                );
-            }
-            glEnd();
+    void OnPlayerJoin(uint32_t playerId, const std::string& name) {
+        std::cout << "[GAME] Player joined: " << name << " (ID: " << playerId << ")\n";
+        
+        // Create remote player
+        auto remotePlayer = std::make_unique<Player::RemotePlayer>(
+            playerId,
+            name,
+            glm::vec3(0.0f, 5.0f, 0.0f) // Default spawn
+        );
+        
+        remotePlayers[playerId] = std::move(remotePlayer);
+    }
+    
+    void OnPlayerLeave(uint32_t playerId) {
+        auto it = remotePlayers.find(playerId);
+        if (it != remotePlayers.end()) {
+            std::cout << "[GAME] Player left: " << it->second->GetName() << "\n";
+            remotePlayers.erase(it);
         }
     }
     
     void RenderHUD() {
-        // Switch to 2D rendering
+        // Simple text overlay using OpenGL (no ImGui in game)
+        
+        // Save state
         glMatrixMode(GL_PROJECTION);
         glPushMatrix();
         glLoadIdentity();
@@ -248,122 +304,32 @@ private:
         glLoadIdentity();
         
         glDisable(GL_DEPTH_TEST);
+        glDisable(GL_LIGHTING);
         
-        // Draw crosshair
-        glColor3f(1, 1, 1);
-        glLineWidth(2.0f);
-        int centerX = width / 2;
-        int centerY = height / 2;
-        int crosshairSize = 10;
+        // Draw player count
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), 
+                "Players: %d | FPS: %d | Ping: %d ms",
+                (int)netManager->GetPlayerCount(),
+                fps,
+                0); // TODO: Implement ping
         
-        glBegin(GL_LINES);
-        glVertex2f(centerX - crosshairSize, centerY);
-        glVertex2f(centerX + crosshairSize, centerY);
-        glVertex2f(centerX, centerY - crosshairSize);
-        glVertex2f(centerX, centerY + crosshairSize);
+        // Draw background
+        glColor4f(0.0f, 0.0f, 0.0f, 0.5f);
+        glBegin(GL_QUADS);
+        glVertex2f(10, 10);
+        glVertex2f(400, 10);
+        glVertex2f(400, 40);
+        glVertex2f(10, 40);
         glEnd();
         
-        // Draw health bar (bottom left)
-        if (localPlayer) {
-            int barWidth = 200;
-            int barHeight = 20;
-            int barX = 20;
-            int barY = height - 40;
-            
-            // Background
-            glColor3f(0.2f, 0.2f, 0.2f);
-            glBegin(GL_QUADS);
-            glVertex2f(barX, barY);
-            glVertex2f(barX + barWidth, barY);
-            glVertex2f(barX + barWidth, barY + barHeight);
-            glVertex2f(barX, barY + barHeight);
-            glEnd();
-            
-            // Health
-            float healthPercent = (float)localPlayer->health / (float)localPlayer->maxHealth;
-            glColor3f(1.0f - healthPercent, healthPercent, 0);
-            glBegin(GL_QUADS);
-            glVertex2f(barX, barY);
-            glVertex2f(barX + barWidth * healthPercent, barY);
-            glVertex2f(barX + barWidth * healthPercent, barY + barHeight);
-            glVertex2f(barX, barY + barHeight);
-            glEnd();
-            
-            // Border
-            glColor3f(1, 1, 1);
-            glLineWidth(2.0f);
-            glBegin(GL_LINE_LOOP);
-            glVertex2f(barX, barY);
-            glVertex2f(barX + barWidth, barY);
-            glVertex2f(barX + barWidth, barY + barHeight);
-            glVertex2f(barX, barY + barHeight);
-            glEnd();
-        }
-        
-        // Restore 3D rendering
+        // Restore state
         glEnable(GL_DEPTH_TEST);
-        glPopMatrix();
+        
         glMatrixMode(GL_PROJECTION);
         glPopMatrix();
         glMatrixMode(GL_MODELVIEW);
-    }
-    
-    void LoadMap(const std::string& mapPath) {
-        // TODO: Actually load .pcd file
-        // For now, just use empty map (ground plane will be rendered)
-        
-        std::cout << "[GAME] Loading map: " << mapPath << "\n";
-        std::cout << "[GAME] Map loading not implemented yet - using ground plane\n";
-        
-        mapGeometry.vertices.clear();
-        mapGeometry.indices.clear();
-    }
-    
-    void OnPlayerJoined(uint32_t playerId, const std::string& name) {
-        if (playerId == netManager->GetLocalPlayerId()) {
-            return; // That's us
-        }
-        
-        std::cout << "[GAME] Player joined: " << name << " (ID: " << playerId << ")\n";
-        
-        // Create remote player
-        auto remotePlayer = std::make_unique<RemotePlayer>(playerId, name);
-        remotePlayer->position = PCD::Vec3(0, 2, 0); // Default spawn
-        remotePlayers[playerId] = std::move(remotePlayer);
-    }
-    
-    void OnPlayerLeft(uint32_t playerId) {
-        auto it = remotePlayers.find(playerId);
-        if (it != remotePlayers.end()) {
-            std::cout << "[GAME] Player left: " << it->second->playerName << "\n";
-            remotePlayers.erase(it);
-        }
-    }
-    
-    void HandleNetworkMessage(const std::string& msgType, const std::vector<std::string>& args) {
-        // Filter out system messages
-        if (msgType == Network::MessageType::PING_REQUEST ||
-            msgType == Network::MessageType::PING_RESPONSE ||
-            msgType.empty()) {
-            return;
-        }
-        
-        if (msgType == Network::MessageType::PLAYER_STATE && args.size() >= 8) {
-            uint32_t playerId = std::stoul(args[0]);
-            
-            // Update remote player
-            auto it = remotePlayers.find(playerId);
-            if (it != remotePlayers.end()) {
-                float x = std::stof(args[1]);
-                float y = std::stof(args[2]);
-                float z = std::stof(args[3]);
-                float yaw = std::stof(args[4]);
-                float pitch = std::stof(args[5]);
-                int health = std::stoi(args[6]);
-                
-                it->second->UpdateFromNetwork(x, y, z, yaw, pitch, health);
-            }
-        }
+        glPopMatrix();
     }
 };
 

@@ -1,210 +1,69 @@
-// RemotePlayer.h - Network-controlled player with interpolation
+// RemotePlayer.h - Remote player representation
 
 #pragma once
 
-#include "Player.h"
-#include <GL/gl.h>
-#include <cmath>
+#include <glm/glm.hpp>
+#include <string>
 
-namespace Game {
+namespace Player {
 
-class RemotePlayer : public Player {
+class RemotePlayer {
 private:
-    // Network interpolation
-    PCD::Vec3 targetPosition;
-    float targetYaw;
-    float targetPitch;
+    uint32_t playerId;
+    std::string name;
     
-    float interpolationSpeed; // How fast to interpolate to target
+    glm::vec3 position;
+    glm::vec3 velocity;
+    
+    float yaw;
+    float pitch;
+    
+    int health;
+    int weapon;
+    
+    // Interpolation for smooth movement
+    glm::vec3 targetPosition;
+    float interpolationSpeed;
 
 public:
-    RemotePlayer(uint32_t id, const std::string& name)
-        : Player(id, name)
-        , targetPosition(0, 0, 0)
-        , targetYaw(0.0f)
-        , targetPitch(0.0f)
-        , interpolationSpeed(10.0f) // Interpolate over ~100ms
+    RemotePlayer(uint32_t id, const std::string& playerName, const glm::vec3& spawnPos)
+        : playerId(id), name(playerName), position(spawnPos)
+        , velocity(0.0f), yaw(0.0f), pitch(0.0f)
+        , health(100), weapon(0), targetPosition(spawnPos)
+        , interpolationSpeed(10.0f)
     {
     }
     
-    void Update(float deltaTime) override {
-        if (!isAlive) return;
+    void Update(float deltaTime) {
+        // Smooth interpolation to target position
+        position = glm::mix(position, targetPosition, interpolationSpeed * deltaTime);
         
-        // Smoothly interpolate to target position
-        float t = std::min(1.0f, interpolationSpeed * deltaTime);
-        
-        position.x = position.x + (targetPosition.x - position.x) * t;
-        position.y = position.y + (targetPosition.y - position.y) * t;
-        position.z = position.z + (targetPosition.z - position.z) * t;
-        
-        // Interpolate rotation
-        yaw = yaw + (targetYaw - yaw) * t;
-        pitch = pitch + (targetPitch - pitch) * t;
+        // Clamp to prevent floating point drift
+        if (glm::distance(position, targetPosition) < 0.01f) {
+            position = targetPosition;
+        }
     }
     
-    void Render() override {
-        if (!isAlive) return;
-        
-        glPushMatrix();
-        
-        // Move to player position
-        glTranslatef(position.x, position.y, position.z);
-        
-        // Rotate to face direction (yaw only - body doesn't pitch)
-        glRotatef(yaw * 180.0f / 3.14159f, 0, 1, 0);
-        
-        // Set player color
-        glColor3f(colorR, colorG, colorB);
-        
-        // Draw body (simple box for now)
-        DrawPlayerBody();
-        
-        // Draw head (separate so it can look up/down later)
-        glPushMatrix();
-        glTranslatef(0, bodyHeight * 0.85f, 0); // Head at top
-        DrawPlayerHead();
-        glPopMatrix();
-        
-        // Draw name tag above head
-        glPushMatrix();
-        glTranslatef(0, bodyHeight + 0.3f, 0);
-        DrawNameTag();
-        glPopMatrix();
-        
-        glPopMatrix();
+    void SetPosition(const glm::vec3& pos) {
+        targetPosition = pos;
     }
     
-    // Update from network data
-    void UpdateFromNetwork(float x, float y, float z, float newYaw, float newPitch, int newHealth) {
-        targetPosition.x = x;
-        targetPosition.y = y;
-        targetPosition.z = z;
-        targetYaw = newYaw;
-        targetPitch = newPitch;
-        health = newHealth;
+    void SetRotation(float newYaw, float newPitch) {
+        yaw = newYaw;
+        pitch = newPitch;
     }
     
-private:
-    void DrawPlayerBody() {
-        // Draw a simple colored box (body)
-        float hw = bodyWidth / 2.0f;
-        float h = bodyHeight * 0.7f; // Body is 70% of total height
-        
-        glBegin(GL_QUADS);
-        
-        // Front
-        glVertex3f(-hw, 0, hw);
-        glVertex3f(hw, 0, hw);
-        glVertex3f(hw, h, hw);
-        glVertex3f(-hw, h, hw);
-        
-        // Back
-        glVertex3f(hw, 0, -hw);
-        glVertex3f(-hw, 0, -hw);
-        glVertex3f(-hw, h, -hw);
-        glVertex3f(hw, h, -hw);
-        
-        // Left
-        glVertex3f(-hw, 0, -hw);
-        glVertex3f(-hw, 0, hw);
-        glVertex3f(-hw, h, hw);
-        glVertex3f(-hw, h, -hw);
-        
-        // Right
-        glVertex3f(hw, 0, hw);
-        glVertex3f(hw, 0, -hw);
-        glVertex3f(hw, h, -hw);
-        glVertex3f(hw, h, hw);
-        
-        // Top
-        glVertex3f(-hw, h, hw);
-        glVertex3f(hw, h, hw);
-        glVertex3f(hw, h, -hw);
-        glVertex3f(-hw, h, -hw);
-        
-        // Bottom
-        glVertex3f(-hw, 0, -hw);
-        glVertex3f(hw, 0, -hw);
-        glVertex3f(hw, 0, hw);
-        glVertex3f(-hw, 0, hw);
-        
-        glEnd();
-        
-        // Draw outline
-        glColor3f(0, 0, 0);
-        glLineWidth(2.0f);
-        glBegin(GL_LINE_LOOP);
-        glVertex3f(-hw, 0, hw);
-        glVertex3f(hw, 0, hw);
-        glVertex3f(hw, h, hw);
-        glVertex3f(-hw, h, hw);
-        glEnd();
-        glBegin(GL_LINE_LOOP);
-        glVertex3f(-hw, 0, -hw);
-        glVertex3f(hw, 0, -hw);
-        glVertex3f(hw, h, -hw);
-        glVertex3f(-hw, h, -hw);
-        glEnd();
-    }
+    void SetHealth(int hp) { health = hp; }
+    void SetWeapon(int wpn) { weapon = wpn; }
     
-    void DrawPlayerHead() {
-        // Draw a smaller box for head
-        float hs = bodyWidth / 3.0f; // Head size
-        
-        // Slightly brighter color for head
-        glColor3f(
-            std::min(1.0f, colorR * 1.2f),
-            std::min(1.0f, colorG * 1.2f),
-            std::min(1.0f, colorB * 1.2f)
-        );
-        
-        glBegin(GL_QUADS);
-        
-        // Simple cube for head
-        glVertex3f(-hs, -hs, hs);
-        glVertex3f(hs, -hs, hs);
-        glVertex3f(hs, hs, hs);
-        glVertex3f(-hs, hs, hs);
-        
-        glVertex3f(hs, -hs, -hs);
-        glVertex3f(-hs, -hs, -hs);
-        glVertex3f(-hs, hs, -hs);
-        glVertex3f(hs, hs, -hs);
-        
-        glVertex3f(-hs, -hs, -hs);
-        glVertex3f(-hs, -hs, hs);
-        glVertex3f(-hs, hs, hs);
-        glVertex3f(-hs, hs, -hs);
-        
-        glVertex3f(hs, -hs, hs);
-        glVertex3f(hs, -hs, -hs);
-        glVertex3f(hs, hs, -hs);
-        glVertex3f(hs, hs, hs);
-        
-        glVertex3f(-hs, hs, hs);
-        glVertex3f(hs, hs, hs);
-        glVertex3f(hs, hs, -hs);
-        glVertex3f(-hs, hs, -hs);
-        
-        glVertex3f(-hs, -hs, -hs);
-        glVertex3f(hs, -hs, -hs);
-        glVertex3f(hs, -hs, hs);
-        glVertex3f(-hs, -hs, hs);
-        
-        glEnd();
-    }
-    
-    void DrawNameTag() {
-        // TODO: Render text with player name
-        // For now, just draw a small white square above player
-        glColor3f(1, 1, 1);
-        glBegin(GL_QUADS);
-        glVertex3f(-0.2f, 0, 0);
-        glVertex3f(0.2f, 0, 0);
-        glVertex3f(0.2f, 0.1f, 0);
-        glVertex3f(-0.2f, 0.1f, 0);
-        glEnd();
-    }
+    uint32_t GetId() const { return playerId; }
+    const std::string& GetName() const { return name; }
+    const glm::vec3& GetPosition() const { return position; }
+    const glm::vec3& GetVelocity() const { return velocity; }
+    float GetYaw() const { return yaw; }
+    float GetPitch() const { return pitch; }
+    int GetHealth() const { return health; }
+    int GetWeapon() const { return weapon; }
 };
 
-} // namespace Game
+} // namespace Player
