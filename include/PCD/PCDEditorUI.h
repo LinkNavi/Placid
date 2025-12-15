@@ -4,6 +4,7 @@
 #include "PCDBrushFactory.h"
 #include "PCDEditorState.h"
 #include "PCDFile.h"
+#include "Engine/TextureLoader.h"
 #include <algorithm>
 #include <cstring>
 #include <imgui.h>
@@ -18,11 +19,13 @@ private:
   bool showBrushList = true;
   bool showProperties = true;
   bool showToolbar = true;
+  bool showTextures = true;
 
   char mapNameBuffer[256] = {};
   char authorBuffer[256] = {};
   char entityNameBuffer[256] = {};
   char brushNameBuffer[256] = {};
+  char texturePathBuffer[512] = {};
 
 public:
   explicit EditorUI(EditorState &s) : state(s) {
@@ -38,6 +41,8 @@ public:
       RenderBrushList();
     if (showEntityList)
       RenderEntityList();
+    if (showTextures)
+      RenderTexturePanel();
     if (showProperties)
       RenderProperties();
     RenderStatusBar();
@@ -83,6 +88,7 @@ private:
         ImGui::MenuItem("Toolbar", nullptr, &showToolbar);
         ImGui::MenuItem("Brush List", nullptr, &showBrushList);
         ImGui::MenuItem("Entity List", nullptr, &showEntityList);
+        ImGui::MenuItem("Textures", nullptr, &showTextures);
         ImGui::MenuItem("Properties", nullptr, &showProperties);
         ImGui::Separator();
         ImGui::MenuItem("Show Grid", nullptr, &state.settings.showGrid);
@@ -196,8 +202,6 @@ private:
     }
   }
 
- 
-
 void RenderToolbar() {
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(80, 380), ImGuiCond_FirstUseEver);
@@ -208,11 +212,10 @@ void RenderToolbar() {
     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "1-5");
     ImGui::Separator();
     
-    // Transform tools
-    ImVec4 activeColor(0.3f, 0.8f, 1.0f, 1.0f);
+    ImVec4 activeColor(0.2f, 0.5f, 0.8f, 1.0f);
     
     if (state.currentTool == PCD::EditorTool::SELECT) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("1-Select", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::SELECT;
     if (state.currentTool == PCD::EditorTool::SELECT) {
@@ -220,7 +223,7 @@ void RenderToolbar() {
     }
     
     if (state.currentTool == PCD::EditorTool::MOVE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("2-Move", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::MOVE;
     if (state.currentTool == PCD::EditorTool::MOVE) {
@@ -228,7 +231,7 @@ void RenderToolbar() {
     }
     
     if (state.currentTool == PCD::EditorTool::ROTATE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("3-Rotate", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::ROTATE;
     if (state.currentTool == PCD::EditorTool::ROTATE) {
@@ -236,7 +239,7 @@ void RenderToolbar() {
     }
     
     if (state.currentTool == PCD::EditorTool::SCALE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("4-Scale", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::SCALE;
     if (state.currentTool == PCD::EditorTool::SCALE) {
@@ -247,7 +250,7 @@ void RenderToolbar() {
     ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Create:");
     
     if (state.currentTool == PCD::EditorTool::CREATE_BOX) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("5-Box (B)", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_BOX;
     if (state.currentTool == PCD::EditorTool::CREATE_BOX) {
@@ -255,7 +258,7 @@ void RenderToolbar() {
     }
     
     if (state.currentTool == PCD::EditorTool::CREATE_CYLINDER) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("Cyl (C)", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_CYLINDER;
     if (state.currentTool == PCD::EditorTool::CREATE_CYLINDER) {
@@ -263,7 +266,7 @@ void RenderToolbar() {
     }
     
     if (state.currentTool == PCD::EditorTool::CREATE_WEDGE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("Wedge", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_WEDGE;
     if (state.currentTool == PCD::EditorTool::CREATE_WEDGE) {
@@ -273,7 +276,7 @@ void RenderToolbar() {
     ImGui::Separator();
     
     if (state.currentTool == PCD::EditorTool::CREATE_ENTITY) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
     }
     if (ImGui::Button("Entity", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::CREATE_ENTITY;
     if (state.currentTool == PCD::EditorTool::CREATE_ENTITY) {
@@ -287,10 +290,9 @@ void RenderToolbar() {
     ImGui::End();
 }
 
-
   void RenderBrushList() {
-    ImGui::SetNextWindowPos(ImVec2(10, 400), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(200, 250), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(10, 420), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("Brushes", &showBrushList);
     ImGui::Text("Count: %zu", state.map.brushes.size());
@@ -312,8 +314,8 @@ void RenderToolbar() {
   }
 
   void RenderEntityList() {
-    ImGui::SetNextWindowPos(ImVec2(220, 400), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(200, 250), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(10, 630), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(200, 150), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("Entities", &showEntityList);
     ImGui::Text("Count: %zu", state.map.entities.size());
@@ -335,9 +337,106 @@ void RenderToolbar() {
     ImGui::End();
   }
 
+  void RenderTexturePanel() {
+    ImGui::SetNextWindowPos(ImVec2(220, 420), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(250, 360), ImGuiCond_FirstUseEver);
+
+    ImGui::Begin("Textures", &showTextures);
+    
+    ImGui::Text("Texture Library");
+    ImGui::Text("Count: %zu", state.map.textures.size());
+    ImGui::Separator();
+    
+    // Load texture button
+    if (ImGui::Button("Load Texture...", ImVec2(230, 30))) {
+      ImGui::OpenPopup("LoadTexture");
+    }
+    
+    // Load texture popup
+    if (ImGui::BeginPopup("LoadTexture")) {
+      ImGui::Text("Enter texture path:");
+      ImGui::SetNextItemWidth(400);
+      if (ImGui::InputText("##texpath", texturePathBuffer, sizeof(texturePathBuffer), 
+                           ImGuiInputTextFlags_EnterReturnsTrue)) {
+        LoadTexture(texturePathBuffer);
+        texturePathBuffer[0] = '\0';
+        ImGui::CloseCurrentPopup();
+      }
+      
+      ImGui::Separator();
+      ImGui::Text("Supported formats: PNG, JPG, BMP, TGA");
+      ImGui::Text("Example: textures/wall.png");
+      
+      if (ImGui::Button("Cancel")) {
+        ImGui::CloseCurrentPopup();
+      }
+      
+      ImGui::EndPopup();
+    }
+    
+    ImGui::Spacing();
+    
+    // Create checkerboard button
+    if (ImGui::Button("Create Checkerboard", ImVec2(230, 25))) {
+      Texture checker = TextureLoader::CreateCheckerboardTexture(64);
+      state.map.AddTexture(checker);
+      state.hasUnsavedChanges = true;
+    }
+    
+    ImGui::Separator();
+    
+    // Texture list
+    ImGui::BeginChild("TextureList", ImVec2(0, 0), true);
+    
+    for (auto& [id, tex] : state.map.textures) {
+      ImGui::PushID(id);
+      
+      // Load OpenGL texture if not loaded
+      if (tex.glTextureID == 0 && !tex.data.empty()) {
+        tex.glTextureID = TextureLoader::CreateGLTexture(tex);
+      }
+      
+      // Show texture preview
+      if (tex.glTextureID != 0) {
+        ImGui::Image((void*)(intptr_t)tex.glTextureID, ImVec2(64, 64));
+      } else {
+        ImGui::Button("No Preview", ImVec2(64, 64));
+      }
+      
+      ImGui::SameLine();
+      ImGui::BeginGroup();
+      
+      ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s", tex.name.c_str());
+      ImGui::Text("ID: %u", tex.id);
+      ImGui::Text("Size: %ux%u", tex.width, tex.height);
+      
+      // Apply to selected brush button
+      if (state.selectedBrushIndex >= 0 && 
+          state.selectedBrushIndex < (int)state.map.brushes.size()) {
+        if (ImGui::SmallButton("Apply to Brush")) {
+          state.map.brushes[state.selectedBrushIndex].textureID = tex.id;
+          state.hasUnsavedChanges = true;
+        }
+      }
+      
+      ImGui::EndGroup();
+      
+      ImGui::Separator();
+      ImGui::PopID();
+    }
+    
+    if (state.map.textures.empty()) {
+      ImGui::TextDisabled("No textures loaded");
+      ImGui::TextWrapped("Click 'Load Texture...' to add textures to your map.");
+    }
+    
+    ImGui::EndChild();
+    ImGui::End();
+  }
+
   void RenderProperties() {
     ImGui::SetNextWindowPos(ImVec2(1060, 30), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(210, 620), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(210, 750), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("Properties", &showProperties);
 
@@ -425,6 +524,43 @@ void RenderToolbar() {
       FLAG_CHECKBOX("No Collide", BRUSH_NOCOLLIDE);
 
 #undef FLAG_CHECKBOX
+
+      // Texture settings
+      ImGui::Separator();
+      ImGui::Text("Texture:");
+      
+      if (brush.textureID > 0) {
+        auto* tex = state.map.GetTexture(brush.textureID);
+        if (tex) {
+          ImGui::Text("  %s", tex->name.c_str());
+          ImGui::Text("  ID: %u", tex->id);
+          
+          if (ImGui::Button("Remove Texture")) {
+            brush.textureID = 0;
+            state.hasUnsavedChanges = true;
+          }
+          
+          ImGui::Separator();
+          ImGui::Text("UV Transform:");
+          if (ImGui::DragFloat("Scale X", &brush.uvScaleX, 0.1f, 0.1f, 10.0f)) {
+            state.hasUnsavedChanges = true;
+          }
+          if (ImGui::DragFloat("Scale Y", &brush.uvScaleY, 0.1f, 0.1f, 10.0f)) {
+            state.hasUnsavedChanges = true;
+          }
+          if (ImGui::DragFloat("Offset X", &brush.uvOffsetX, 0.1f, -10.0f, 10.0f)) {
+            state.hasUnsavedChanges = true;
+          }
+          if (ImGui::DragFloat("Offset Y", &brush.uvOffsetY, 0.1f, -10.0f, 10.0f)) {
+            state.hasUnsavedChanges = true;
+          }
+        } else {
+          ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "  Invalid ID");
+        }
+      } else {
+        ImGui::TextDisabled("  None");
+        ImGui::TextWrapped("Use the Textures panel to apply a texture.");
+      }
     }
   }
 
@@ -558,7 +694,6 @@ void RenderToolbar() {
 
     ImGui::Begin("StatusBar", nullptr, flags);
 
-    // Tool name with color
     const char *toolNames[] = {
         "Select (1)",   "Move (2)",         "Rotate (3)",
         "Scale (4)",    "Create Box (5/B)", "Create Cylinder (C)",
@@ -569,27 +704,28 @@ void RenderToolbar() {
     ImGui::Text("%s", toolNames[static_cast<int>(state.currentTool)]);
 
     ImGui::SameLine(250);
-    ImGui::Text("| Brushes: %zu | Entities: %zu", state.map.brushes.size(),
-                state.map.entities.size());
+    ImGui::Text("| Brushes: %zu | Entities: %zu | Textures: %zu", 
+                state.map.brushes.size(),
+                state.map.entities.size(),
+                state.map.textures.size());
 
-    ImGui::SameLine(500);
+    ImGui::SameLine(550);
     ImGui::Text("| Grid: %.2f", state.settings.gridSize);
 
-    ImGui::SameLine(600);
+    ImGui::SameLine(650);
     if (state.settings.snapToGrid) {
       ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "| Snap: ON");
     } else {
       ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "| Snap: OFF");
     }
 
-    ImGui::SameLine(720);
+    ImGui::SameLine(770);
     if (state.hasUnsavedChanges) {
       ImGui::TextColored(ImVec4(1, 0.6f, 0.4f, 1), "| * UNSAVED *");
     } else {
       ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1), "| Saved");
     }
 
-    // Right side - help text
     ImGui::SameLine(viewport->Size.x - 380);
     ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
                        "F5: Test | Ctrl+S: Save | Del: Delete");
@@ -615,6 +751,17 @@ void RenderToolbar() {
     if (PCDWriter::Save(state.map, path)) {
       state.hasUnsavedChanges = false;
       state.currentFilePath = path;
+    }
+  }
+  
+  void LoadTexture(const std::string& path) {
+    Texture tex;
+    if (TextureLoader::LoadImage(path, tex)) {
+      state.map.AddTexture(tex);
+      state.hasUnsavedChanges = true;
+      std::cout << "[UI] Loaded texture: " << tex.name << "\n";
+    } else {
+      std::cerr << "[UI] Failed to load texture: " << path << "\n";
     }
   }
 };

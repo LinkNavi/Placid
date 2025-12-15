@@ -1,3 +1,5 @@
+// Enhanced EditorApp.cpp with Unity-like camera controls
+
 #include "Engine/EditorApp.h"
 #include "Engine/GameMode.h"
 #include <glad/gl.h>
@@ -11,11 +13,16 @@ namespace Editor {
 
 EditorApp::EditorApp() 
     : window(nullptr), mapEditor(nullptr), renderer(nullptr), gameMode(nullptr),
-      currentMode(EditorMode::EDIT),
-      editorCamDist(30.0f), editorCamYaw(0.45f), editorCamPitch(0.6f),
-      editorCamTarget(0, 0, 0), lastX(640), lastY(360), firstMouse(true), 
-      dragAccumX(0), dragAccumZ(0), isLeftDragging(false),  // <-- ADD THIS
-      lastFrame(0) {}
+      currentMode(EditorMode::EDIT), cameraMode(CameraMode::FREE),
+      cameraPosition(0, 10, 20), cameraFocusPoint(0, 0, 0),
+      cameraDistance(20.0f), cameraYaw(0.0f), cameraPitch(0.4f), cameraFOV(60.0f),
+      cameraMoveSpeed(10.0f), cameraRotateSpeed(0.005f), cameraZoomSpeed(2.0f),
+      shiftPressed(false),
+      dragAccumX(0), dragAccumZ(0),
+      isLeftDragging(false), isRightDragging(false), isMiddleDragging(false),
+      isAltPressed(false),
+      lastX(640), lastY(360), firstMouse(true), 
+      lastFrame(0), deltaTime(0) {}
 
 EditorApp::~EditorApp() {
     Shutdown();
@@ -30,6 +37,7 @@ bool EditorApp::Initialize(int width, int height, const char* title) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4);
     
     window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
@@ -53,6 +61,7 @@ bool EditorApp::Initialize(int width, int height, const char* title) {
     
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
+    glEnable(GL_MULTISAMPLE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     
     IMGUI_CHECKVERSION();
@@ -72,6 +81,7 @@ bool EditorApp::Initialize(int width, int height, const char* title) {
     
     mapEditor = new MapEditor();
     
+    // Create default floor if map is empty
     if (mapEditor->GetMap().brushes.empty()) {
         PCD::Brush floor = mapEditor->CreateBox(
             PCD::Vec3(-20, -1, -20),
@@ -89,31 +99,19 @@ bool EditorApp::Initialize(int width, int height, const char* title) {
         mapEditor->GetMap().entities.push_back(spawn);
     }
     
-    std::cout << "\n=== Placid Map Editor ===\n";
-    std::cout << "Controls:\n";
-    std::cout << "  WASD/QE     - Move camera\n";
-    std::cout << "  Right Mouse - Rotate view\n";
-    std::cout << "  Middle Mouse- Pan view\n";
-    std::cout << "  Scroll      - Zoom\n";
-    std::cout << "  Left Click  - Select/Manipulate\n";
-    std::cout << "  1-5         - Tools (Select/Move/Rotate/Scale/Create)\n";
-    std::cout << "  Shift+Drag  - Constrain to axis\n";
-    std::cout << "  Ctrl+S      - Save map\n";
-    std::cout << "  Delete      - Delete selected\n";
-    std::cout << "  Ctrl+D      - Duplicate\n";
-    std::cout << "  F5          - Test map\n";
-    std::cout << "=========================\n\n";
-    
     return true;
 }
 
 void EditorApp::Run() {
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = glfwGetTime();
-        float dt = currentFrame - lastFrame;
+        deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
         
-        ProcessInput(dt);
+        if (deltaTime > 0.1f) deltaTime = 0.1f;
+        
+        ProcessInput(deltaTime);
+        UpdateCamera(deltaTime);
         Render();
         
         glfwSwapBuffers(window);
@@ -144,34 +142,109 @@ void EditorApp::ProcessInput(float dt) {
         return;
     }
     
+    // Check modifier keys
+    shiftPressed = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ||
+                   (glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
+    isAltPressed = (glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS) ||
+                   (glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS);
+    
     // Camera movement (only when not hovering UI)
     ImGuiIO& io = ImGui::GetIO();
-    if (!io.WantCaptureMouse && !io.WantCaptureKeyboard) {
-        float moveSpeed = editorCamDist * 0.02f;
+    if (!io.WantCaptureMouse && !io.WantCaptureKeyboard && cameraMode == CameraMode::FREE) {
+        float speed = cameraMoveSpeed * (shiftPressed ? 2.0f : 1.0f);
+        
+        Vec3 forward = GetCameraForward();
+        Vec3 right = GetCameraRight();
+        
+        // Ground-aligned movement
+        forward.y = 0;
+        forward = forward.normalized();
+        right.y = 0;
+        right = right.normalized();
         
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-            editorCamTarget.z -= moveSpeed * cos(editorCamYaw);
-            editorCamTarget.x -= moveSpeed * sin(editorCamYaw);
+            cameraFocusPoint = cameraFocusPoint + forward * speed * dt;
         }
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-            editorCamTarget.z += moveSpeed * cos(editorCamYaw);
-            editorCamTarget.x += moveSpeed * sin(editorCamYaw);
+            cameraFocusPoint = cameraFocusPoint - forward * speed * dt;
         }
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            editorCamTarget.x -= moveSpeed * cos(editorCamYaw);
-            editorCamTarget.z += moveSpeed * sin(editorCamYaw);
+            cameraFocusPoint = cameraFocusPoint - right * speed * dt;
         }
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            editorCamTarget.x += moveSpeed * cos(editorCamYaw);
-            editorCamTarget.z -= moveSpeed * sin(editorCamYaw);
+            cameraFocusPoint = cameraFocusPoint + right * speed * dt;
         }
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-            editorCamTarget.y -= moveSpeed;
+            cameraFocusPoint.y -= speed * dt;
         }
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
-            editorCamTarget.y += moveSpeed;
+            cameraFocusPoint.y += speed * dt;
         }
     }
+}
+
+void EditorApp::UpdateCamera(float dt) {
+    // Calculate camera position from focus point, distance, and rotation
+    cameraPosition.x = cameraFocusPoint.x + cameraDistance * sin(cameraYaw) * cos(cameraPitch);
+    cameraPosition.y = cameraFocusPoint.y + cameraDistance * sin(cameraPitch);
+    cameraPosition.z = cameraFocusPoint.z + cameraDistance * cos(cameraYaw) * cos(cameraPitch);
+}
+
+void EditorApp::FocusOnSelection() {
+    if (mapEditor->GetSelectedBrushIndex() >= 0) {
+        PCD::Vec3 pos = mapEditor->GetSelectedObjectPosition();
+        cameraFocusPoint = Vec3(pos.x, pos.y, pos.z);
+        cameraDistance = 15.0f;
+    } else if (mapEditor->GetSelectedEntityIndex() >= 0) {
+        PCD::Vec3 pos = mapEditor->GetSelectedObjectPosition();
+        cameraFocusPoint = Vec3(pos.x, pos.y, pos.z);
+        cameraDistance = 10.0f;
+    }
+}
+
+void EditorApp::OrbitCamera(float deltaX, float deltaY) {
+    cameraYaw -= deltaX * cameraRotateSpeed;
+    cameraPitch += deltaY * cameraRotateSpeed;
+    
+    // Clamp pitch
+    const float maxPitch = 1.5f;
+    if (cameraPitch > maxPitch) cameraPitch = maxPitch;
+    if (cameraPitch < -maxPitch) cameraPitch = -maxPitch;
+}
+
+void EditorApp::PanCamera(float deltaX, float deltaY) {
+    Vec3 right = GetCameraRight();
+    Vec3 up = GetCameraUp();
+    
+    float panSpeed = cameraDistance * 0.002f;
+    cameraFocusPoint = cameraFocusPoint - right * deltaX * panSpeed;
+    cameraFocusPoint = cameraFocusPoint + up * deltaY * panSpeed;
+}
+
+void EditorApp::ZoomCamera(float delta) {
+    cameraDistance -= delta * cameraZoomSpeed;
+    if (cameraDistance < 1.0f) cameraDistance = 1.0f;
+    if (cameraDistance > 500.0f) cameraDistance = 500.0f;
+}
+
+Vec3 EditorApp::GetCameraForward() const {
+    return Vec3(
+        sin(cameraYaw) * cos(cameraPitch),
+        sin(cameraPitch),
+        cos(cameraYaw) * cos(cameraPitch)
+    );
+}
+
+Vec3 EditorApp::GetCameraRight() const {
+    Vec3 forward = GetCameraForward();
+    Vec3 up(0, 1, 0);
+    return forward.cross(up).normalized();
+}
+
+Vec3 EditorApp::GetCameraUp() const {
+    Vec3 forward = GetCameraForward();
+    Vec3 right = GetCameraRight();
+    return right.cross(forward).normalized();
 }
 
 void EditorApp::Render() {
@@ -221,21 +294,20 @@ void EditorApp::Render() {
     
     GetEditorViewMatrix(view);
     
-    float fov = 45.0f;
-    float f = 1.0f / tan(fov * 3.14159f / 360.0f);
-    float near = 0.1f, far = 500.0f;
+    // Projection matrix
+    float f = 1.0f / tan(cameraFOV * 3.14159f / 360.0f);
+    float near = 0.1f, far = 1000.0f;
     
     proj[0] = f/aspect; proj[4] = 0; proj[8] = 0;                      proj[12] = 0;
     proj[1] = 0;        proj[5] = f; proj[9] = 0;                      proj[13] = 0;
     proj[2] = 0;        proj[6] = 0; proj[10] = (far+near)/(near-far); proj[14] = (2*far*near)/(near-far);
     proj[3] = 0;        proj[7] = 0; proj[11] = -1;                    proj[15] = 0;
     
-    renderer->RenderGrid(mapEditor->GetSettings(), PCD::Vec3(editorCamTarget.x, editorCamTarget.y, editorCamTarget.z), view, proj);
+    renderer->RenderGrid(mapEditor->GetSettings(), PCD::Vec3(cameraFocusPoint.x, cameraFocusPoint.y, cameraFocusPoint.z), view, proj);
     renderer->RenderBrushes(mapEditor->GetMap().brushes, mapEditor->GetSelectedBrushIndex(), view, proj);
     renderer->RenderEntities(mapEditor->GetMap().entities, mapEditor->GetSelectedEntityIndex(), 
                             mapEditor->GetSettings().showEntityIcons, view, proj);
     
-    // Render gizmo for selected object
     mapEditor->RenderGizmo(renderer, view, proj);
     
     if (mapEditor->IsCreating()) {
@@ -254,12 +326,8 @@ void EditorApp::Render() {
 }
 
 void EditorApp::GetEditorViewMatrix(float* mat) {
-    float camX = editorCamTarget.x + editorCamDist * sin(editorCamYaw) * cos(editorCamPitch);
-    float camY = editorCamTarget.y + editorCamDist * sin(editorCamPitch);
-    float camZ = editorCamTarget.z + editorCamDist * cos(editorCamYaw) * cos(editorCamPitch);
-    
-    Vec3 eye(camX, camY, camZ);
-    Vec3 target = editorCamTarget;
+    Vec3 eye = cameraPosition;
+    Vec3 target = cameraFocusPoint;
     Vec3 up(0, 1, 0);
     
     Vec3 f = (target - eye).normalized();
@@ -279,7 +347,6 @@ void EditorApp::EnterPlayMode() {
     gameMode->Initialize();
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     firstMouse = true;
-    std::cout << "Play mode active. Press ESC to return to editor.\n";
 }
 
 void EditorApp::ExitPlayMode() {
@@ -289,7 +356,6 @@ void EditorApp::ExitPlayMode() {
     gameMode = nullptr;
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     firstMouse = true;
-    std::cout << "Returned to editor.\n";
 }
 
 EditorApp* EditorApp::GetInstance(GLFWwindow* window) {
@@ -322,9 +388,13 @@ void EditorApp::KeyCallback(GLFWwindow* window, int key, int scancode, int actio
         
         if (!app->mapEditor) return;
         
-        // Check if UI wants keyboard
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureKeyboard) return;
+        
+        // F key to frame selection
+        if (key == GLFW_KEY_F) {
+            app->FocusOnSelection();
+        }
         
         if (mods & GLFW_MOD_CONTROL) {
             if (key == GLFW_KEY_N) app->mapEditor->NewMap();
@@ -334,7 +404,6 @@ void EditorApp::KeyCallback(GLFWwindow* window, int key, int scancode, int actio
             if (key == GLFW_KEY_D) app->mapEditor->DuplicateSelected();
             if (key == GLFW_KEY_A) app->mapEditor->SelectAll();
         } else {
-            // Tool hotkeys (number keys)
             if (key == GLFW_KEY_1) app->mapEditor->SetTool(PCD::EditorTool::SELECT);
             if (key == GLFW_KEY_2) app->mapEditor->SetTool(PCD::EditorTool::MOVE);
             if (key == GLFW_KEY_3) app->mapEditor->SetTool(PCD::EditorTool::ROTATE);
@@ -344,7 +413,6 @@ void EditorApp::KeyCallback(GLFWwindow* window, int key, int scancode, int actio
             if (key == GLFW_KEY_DELETE) app->mapEditor->DeleteSelected();
             if (key == GLFW_KEY_ESCAPE) app->mapEditor->DeselectAll();
             
-            // B/C for quick brush creation
             if (key == GLFW_KEY_B) app->mapEditor->SetTool(PCD::EditorTool::CREATE_BOX);
             if (key == GLFW_KEY_C) app->mapEditor->SetTool(PCD::EditorTool::CREATE_CYLINDER);
         }
@@ -358,38 +426,59 @@ void EditorApp::MouseButtonCallback(GLFWwindow* window, int button, int action, 
     if (app->currentMode == EditorMode::PLAY) return;
     if (!app->mapEditor) return;
     
-    // Check if UI wants mouse
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureMouse) return;
     
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
-            // Start dragging - reset accumulator
-            app->dragAccumX = 0;
-            app->dragAccumZ = 0;
-            app->isLeftDragging = true;
-            
-            int width, height;
-            glfwGetWindowSize(window, &width, &height);
-            
-            double mx, my;
-            glfwGetCursorPos(window, &mx, &my);
-            
-            float ndcX = (2.0f * mx / width) - 1.0f;
-            float ndcY = 1.0f - (2.0f * my / height);
-            
-            auto& settings = app->mapEditor->GetSettings();
-            float gridY = settings.gridHeight;
-            float worldX = app->editorCamTarget.x + ndcX * app->editorCamDist * 0.5f;
-            float worldZ = app->editorCamTarget.z + ndcY * app->editorCamDist * 0.5f;
-            
-            bool shift = mods & GLFW_MOD_SHIFT;
-            app->mapEditor->OnMouseClick(worldX, gridY, worldZ, shift);
-            
+            if (app->isAltPressed) {
+                // Alt+Left = Orbit mode
+                app->cameraMode = CameraMode::ORBIT;
+                app->isLeftDragging = true;
+            } else {
+                // Normal left click - selection/manipulation
+                app->dragAccumX = 0;
+                app->dragAccumZ = 0;
+                app->isLeftDragging = true;
+                
+                int width, height;
+                glfwGetWindowSize(window, &width, &height);
+                
+                double mx, my;
+                glfwGetCursorPos(window, &mx, &my);
+                
+                float ndcX = (2.0f * mx / width) - 1.0f;
+                float ndcY = 1.0f - (2.0f * my / height);
+                
+                auto& settings = app->mapEditor->GetSettings();
+                float gridY = settings.gridHeight;
+                float worldX = app->cameraFocusPoint.x + ndcX * app->cameraDistance * 0.5f;
+                float worldZ = app->cameraFocusPoint.z + ndcY * app->cameraDistance * 0.5f;
+                
+                bool shift = mods & GLFW_MOD_SHIFT;
+                app->mapEditor->OnMouseClick(worldX, gridY, worldZ, shift);
+            }
         } else if (action == GLFW_RELEASE) {
-            // Stop dragging
             app->isLeftDragging = false;
-            app->mapEditor->OnMouseRelease();
+            if (app->cameraMode == CameraMode::ORBIT) {
+                app->cameraMode = CameraMode::FREE;
+            } else {
+                app->mapEditor->OnMouseRelease();
+            }
+        }
+    }
+    
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        app->isRightDragging = (action == GLFW_PRESS);
+    }
+    
+    if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        if (action == GLFW_PRESS) {
+            app->cameraMode = CameraMode::PAN;
+            app->isMiddleDragging = true;
+        } else {
+            app->isMiddleDragging = false;
+            app->cameraMode = CameraMode::FREE;
         }
     }
 }
@@ -402,9 +491,7 @@ void EditorApp::ScrollCallback(GLFWwindow* window, double xoffset, double yoffse
     if (io.WantCaptureMouse) return;
     
     if (app->currentMode == EditorMode::EDIT) {
-        app->editorCamDist -= yoffset * 2.0f;
-        if (app->editorCamDist < 5.0f) app->editorCamDist = 5.0f;
-        if (app->editorCamDist > 200.0f) app->editorCamDist = 200.0f;
+        app->ZoomCamera(yoffset);
     }
 }
 
@@ -429,62 +516,49 @@ void EditorApp::MouseCallback(GLFWwindow* window, double xpos, double ypos) {
     }
     
     if (app->currentMode == EditorMode::EDIT) {
-        // Check if UI wants mouse
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
         
-        // Rotate with right mouse
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-            app->editorCamYaw += dx * 0.005f;
-            app->editorCamPitch += dy * 0.005f;
-            if (app->editorCamPitch < 0.1f) app->editorCamPitch = 0.1f;
-            if (app->editorCamPitch > 1.5f) app->editorCamPitch = 1.5f;
+        // Right-click rotate (orbit)
+        if (app->isRightDragging) {
+            app->OrbitCamera(dx, dy);
         }
         
-        // Pan with middle mouse
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS) {
-            float panSpeed = app->editorCamDist * 0.002f;
-            app->editorCamTarget.x -= dx * panSpeed * cos(app->editorCamYaw);
-            app->editorCamTarget.z -= dx * panSpeed * sin(app->editorCamYaw);
-            app->editorCamTarget.y += dy * panSpeed;
+        // Middle-click pan
+        if (app->isMiddleDragging || app->cameraMode == CameraMode::PAN) {
+            app->PanCamera(dx, dy);
         }
         
-        // Drag for manipulation or creation
-        if (app->mapEditor && app->isLeftDragging) {
-            // Convert screen delta to world delta based on camera
-            float moveScale = app->editorCamDist * 0.005f;
+        // Alt+Left orbit
+        if (app->cameraMode == CameraMode::ORBIT && app->isLeftDragging) {
+            app->OrbitCamera(dx, dy);
+        }
+        
+        // Drag for manipulation
+        if (app->mapEditor && app->isLeftDragging && app->cameraMode == CameraMode::FREE) {
+            float moveScale = app->cameraDistance * 0.005f;
             
-            float screenDX = dx;
-            float screenDY = dy;
+            Vec3 right = app->GetCameraRight();
+            Vec3 forward = app->GetCameraForward();
+            forward.y = 0;
+            forward = forward.normalized();
             
-            // Convert to camera-relative world delta
-            float cosYaw = cos(app->editorCamYaw);
-            float sinYaw = sin(app->editorCamYaw);
+            float worldDX = (dx * right.x - dy * forward.x) * moveScale;
+            float worldDZ = (dx * right.z - dy * forward.z) * moveScale;
             
-            // Right = perpendicular to forward
-            float rightX = -sinYaw;
-            float rightZ = cosYaw;
-            
-            // Forward = camera forward (projected on XZ)
-            float forwardX = cosYaw;
-            float forwardZ = sinYaw;
-            
-            // Combine: mouse right = world right, mouse up = world forward
-            float worldDX = (screenDX * rightX - screenDY * forwardX) * moveScale;
-            float worldDZ = (screenDX * rightZ - screenDY * forwardZ) * moveScale;
+            app->dragAccumX += worldDX;
+            app->dragAccumZ += worldDZ;
             
             auto& settings = app->mapEditor->GetSettings();
             float gridY = settings.gridHeight;
-            
-            // Accumulate in member variables
-            app->dragAccumX += worldDX;
-            app->dragAccumZ += worldDZ;
             
             bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
                          glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
             
             app->mapEditor->OnMouseDrag(app->dragAccumX, gridY, app->dragAccumZ, 
-                                       screenDX, screenDY, shift);
+                                       dx, dy, shift);
         }
     }
-}} // namespace Editor
+}
+
+} // namespace Editor

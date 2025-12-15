@@ -55,9 +55,51 @@ if [ "$IMGUI_FOUND" = false ]; then
 fi
 
 echo ""
+
+# Check for stb_image.h
+if [ ! -f "include/stb/stb_image.h" ]; then
+    echo "✗ stb_image.h not found"
+    echo ""
+    echo "Would you like to download stb_image.h? (y/n)"
+    echo "(Required for PNG/JPG texture loading)"
+    read -r response
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        echo "Downloading stb_image.h..."
+        mkdir -p include/stb
+        
+        if command -v curl &> /dev/null; then
+            curl -L https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
+                 -o include/stb/stb_image.h
+            echo "✓ stb_image.h downloaded"
+        elif command -v wget &> /dev/null; then
+            wget https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
+                 -O include/stb/stb_image.h
+            echo "✓ stb_image.h downloaded"
+        else
+            echo "✗ Neither curl nor wget found!"
+            echo "Please download manually from:"
+            echo "  https://raw.githubusercontent.com/nothings/stb/master/stb_image.h"
+            echo "And save to: include/stb/stb_image.h"
+        fi
+    else
+        echo ""
+        echo "Skipping stb_image.h. Texture loading will not be available."
+        echo "To add later, download from:"
+        echo "  https://github.com/nothings/stb/blob/master/stb_image.h"
+    fi
+else
+    echo "✓ stb_image.h found"
+fi
+
+echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Next steps:"
-echo "  ./run.sh           # Build and run editor"
-echo "  ./run.sh --server  # Build and run server"
+echo "  ./build.sh         # Build the project"
+echo "  ./run.sh           # Build and run"
+echo ""
+echo "Available executables after building:"
+echo "  ./build/bin/editor    # Standalone map editor"
+echo "  ./build/bin/placid    # Full game with multiplayer"
 echo ""

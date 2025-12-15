@@ -41,9 +41,8 @@ include_directories(
     ${ENET_INCLUDE_DIRS}
 )
 
-# Main executable
-add_executable(placid
-    src/main.cpp
+# Common source files
+set(COMMON_SOURCES
     src/EditorApp.cpp
     src/GameMode.cpp
     src/Renderer.cpp
@@ -53,10 +52,33 @@ add_executable(placid
     ${GLAD_SOURCES}
 )
 
+# Main game executable (multiplayer)
+add_executable(placid
+    src/main.cpp
+    ${COMMON_SOURCES}
+)
+
 target_link_libraries(placid
     glfw
     OpenGL::GL
     ${ENET_LIBRARIES}
+    ${CMAKE_DL_LIBS}
+    pthread
+)
+
+# Standalone map editor
+add_executable(editor
+    src/Editor.cpp
+    src/EditorApp.cpp
+    src/GameMode.cpp
+    src/Renderer.cpp
+    ${IMGUI_SOURCES}
+    ${GLAD_SOURCES}
+)
+
+target_link_libraries(editor
+    glfw
+    OpenGL::GL
     ${CMAKE_DL_LIBS}
     pthread
 )

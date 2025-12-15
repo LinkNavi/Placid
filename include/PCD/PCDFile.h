@@ -4,17 +4,21 @@
 #include "PCDTypes.h"
 #include <fstream>
 #include <cstring>
+#include <iostream>
 
 namespace PCD {
 
-const char MAGIC[4] = {'P', 'C', 'D', '1'};
-const uint32_t VERSION = 1;
+const char MAGIC[4] = {'P', 'C', 'D', '2'}; // Version 2 with textures
+const uint32_t VERSION = 2;
 
 class PCDWriter {
 public:
     static bool Save(const Map& map, const std::string& filename) {
         std::ofstream file(filename, std::ios::binary);
-        if (!file.is_open()) return false;
+        if (!file.is_open()) {
+            std::cerr << "[PCD] Failed to open file for writing: " << filename << "\n";
+            return false;
+        }
         
         // Header
         file.write(MAGIC, 4);
@@ -22,13 +26,25 @@ public:
         WriteU32(file, 0); // Flags
         WriteU32(file, static_cast<uint32_t>(map.brushes.size()));
         WriteU32(file, static_cast<uint32_t>(map.entities.size()));
+        WriteU32(file, static_cast<uint32_t>(map.textures.size())); // NEW: Texture count
         
-        char reserved[12] = {0};
-        file.write(reserved, 12);
+        char reserved[8] = {0};
+        file.write(reserved, 8);
         
         // Metadata
         WriteString(file, map.name);
         WriteString(file, map.author);
+        
+        // Textures (NEW)
+        for (const auto& [id, tex] : map.textures) {
+            WriteU32(file, tex.id);
+            WriteString(file, tex.name);
+            WriteU32(file, tex.width);
+            WriteU32(file, tex.height);
+            WriteU32(file, tex.channels);
+            WriteU32(file, static_cast<uint32_t>(tex.data.size()));
+            file.write(reinterpret_cast<const char*>(tex.data.data()), tex.data.size());
+        }
         
         // Brushes
         for (const auto& brush : map.brushes) {
@@ -58,6 +74,13 @@ public:
             WriteFloat(file, brush.color.x);
             WriteFloat(file, brush.color.y);
             WriteFloat(file, brush.color.z);
+            
+            // UV transform (NEW)
+            WriteFloat(file, brush.uvScaleX);
+            WriteFloat(file, brush.uvScaleY);
+            WriteFloat(file, brush.uvOffsetX);
+            WriteFloat(file, brush.uvOffsetY);
+            
             WriteString(file, brush.name);
         }
         
@@ -82,6 +105,11 @@ public:
             WriteString(file, ent.name);
         }
         
+        std::cout << "[PCD] Saved map: " << filename << "\n";
+        std::cout << "  Brushes: " << map.brushes.size() << "\n";
+        std::cout << "  Entities: " << map.entities.size() << "\n";
+        std::cout << "  Textures: " << map.textures.size() << "\n";
+        
         return true;
     }
     
@@ -103,24 +131,61 @@ class PCDReader {
 public:
     static bool Load(Map& map, const std::string& filename) {
         std::ifstream file(filename, std::ios::binary);
-        if (!file.is_open()) return false;
+        if (!file.is_open()) {
+            std::cerr << "[PCD] Failed to open file: " << filename << "\n";
+            return false;
+        }
         
         char magic[4];
         file.read(magic, 4);
-        if (memcmp(magic, MAGIC, 4) != 0) return false;
+        if (memcmp(magic, "PCD1", 4) != 0 && memcmp(magic, "PCD2", 4) != 0) {
+            std::cerr << "[PCD] Invalid file format\n";
+            return false;
+        }
+        
+        bool isVersion2 = (memcmp(magic, "PCD2", 4) == 0);
         
         uint32_t version = ReadU32(file);
-        if (version > VERSION) return false;
+        if (version > VERSION) {
+            std::cerr << "[PCD] Unsupported version: " << version << "\n";
+            return false;
+        }
         
         ReadU32(file); // flags
         uint32_t brushCount = ReadU32(file);
         uint32_t entityCount = ReadU32(file);
+        uint32_t textureCount = 0;
         
-        file.seekg(12, std::ios::cur); // reserved
+        if (isVersion2) {
+            textureCount = ReadU32(file);
+            file.seekg(8, std::ios::cur); // reserved
+        } else {
+            file.seekg(12, std::ios::cur); // reserved (old format)
+        }
         
         map.Clear();
         map.name = ReadString(file);
         map.author = ReadString(file);
+        
+        // Textures (Version 2+)
+        if (isVersion2 && textureCount > 0) {
+            for (uint32_t i = 0; i < textureCount; i++) {
+                Texture tex;
+                tex.id = ReadU32(file);
+                tex.name = ReadString(file);
+                tex.width = ReadU32(file);
+                tex.height = ReadU32(file);
+                tex.channels = ReadU32(file);
+                uint32_t dataSize = ReadU32(file);
+                
+                tex.data.resize(dataSize);
+                file.read(reinterpret_cast<char*>(tex.data.data()), dataSize);
+                
+                map.textures[tex.id] = tex;
+            }
+            
+            map.nextTextureID = textureCount + 1;
+        }
         
         // Brushes
         for (uint32_t i = 0; i < brushCount; i++) {
@@ -156,6 +221,15 @@ public:
             brush.color.x = ReadFloat(file);
             brush.color.y = ReadFloat(file);
             brush.color.z = ReadFloat(file);
+            
+            // UV transform (Version 2+)
+            if (isVersion2) {
+                brush.uvScaleX = ReadFloat(file);
+                brush.uvScaleY = ReadFloat(file);
+                brush.uvOffsetX = ReadFloat(file);
+                brush.uvOffsetY = ReadFloat(file);
+            }
+            
             brush.name = ReadString(file);
             
             map.brushes.push_back(brush);
@@ -186,6 +260,11 @@ public:
             
             map.entities.push_back(ent);
         }
+        
+        std::cout << "[PCD] Loaded map: " << filename << "\n";
+        std::cout << "  Brushes: " << map.brushes.size() << "\n";
+        std::cout << "  Entities: " << map.entities.size() << "\n";
+        std::cout << "  Textures: " << map.textures.size() << "\n";
         
         return true;
     }

@@ -18,6 +18,12 @@ enum class EditorMode {
     PLAY
 };
 
+enum class CameraMode {
+    FREE,      // Normal WASD movement
+    ORBIT,     // Alt+Left - orbit around focus point
+    PAN        // Middle mouse - pan view
+};
+
 class EditorApp {
 private:
     GLFWwindow* window;
@@ -26,21 +32,36 @@ private:
     Game::GameMode* gameMode;
     EditorMode currentMode;
     
-    // Camera state
-    float editorCamDist;
-    float editorCamYaw;
-    float editorCamPitch;
-    Vec3 editorCamTarget;  // Using Camera.h Vec3
-     // Drag state tracking
+    // Unity-like camera
+    CameraMode cameraMode;
+    Vec3 cameraPosition;
+    Vec3 cameraFocusPoint;
+    float cameraDistance;
+    float cameraYaw;
+    float cameraPitch;
+    float cameraFOV;
+    
+    // Camera movement
+    float cameraMoveSpeed;
+    float cameraRotateSpeed;
+    float cameraZoomSpeed;
+    bool shiftPressed;
+    
+    // Drag state
     float dragAccumX;
     float dragAccumZ;
     bool isLeftDragging;
+    bool isRightDragging;
+    bool isMiddleDragging;
+    bool isAltPressed;
+    
     // Mouse state
     double lastX, lastY;
     bool firstMouse;
     
     // Timing
     float lastFrame;
+    float deltaTime;
     
 public:
     EditorApp();
@@ -55,7 +76,17 @@ public:
     
 private:
     void ProcessInput(float dt);
+    void UpdateCamera(float dt);
     void Render();
+    
+    // Camera functions
+    void FocusOnSelection();
+    void OrbitCamera(float deltaX, float deltaY);
+    void PanCamera(float deltaX, float deltaY);
+    void ZoomCamera(float delta);
+    Vec3 GetCameraForward() const;
+    Vec3 GetCameraRight() const;
+    Vec3 GetCameraUp() const;
     void GetEditorViewMatrix(float* mat);
     
     // GLFW callbacks
@@ -64,7 +95,7 @@ private:
     static void MouseCallback(GLFWwindow* window, double xpos, double ypos);
     static void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
     
-    // Helper to get instance from window
+    // Helper
     static EditorApp* GetInstance(GLFWwindow* window);
 };
 

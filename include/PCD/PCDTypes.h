@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
+#include <unordered_map>
 
 namespace PCD {
 
@@ -59,7 +60,6 @@ struct Vec3 {
     Vec3() = default;
     Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
     
-    // Add arithmetic operators
     Vec3 operator+(const Vec3& v) const { 
         return Vec3(x + v.x, y + v.y, z + v.z); 
     }
@@ -107,6 +107,19 @@ struct Vec2 {
     Vec2(float u, float v) : u(u), v(v) {}
 };
 
+// Texture data embedded in map file
+struct Texture {
+    uint32_t id = 0;
+    std::string name;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t channels = 4; // RGBA
+    std::vector<uint8_t> data; // Raw pixel data
+    
+    // Runtime OpenGL texture ID (not saved)
+    mutable uint32_t glTextureID = 0;
+};
+
 struct Vertex {
     Vec3 position;
     Vec3 normal;
@@ -117,10 +130,16 @@ struct Brush {
     uint32_t id = 0;
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    uint32_t textureID = 0;
+    uint32_t textureID = 0; // References texture by ID
     uint32_t flags = BRUSH_SOLID;
     Vec3 color{0.5f, 0.5f, 0.5f};
     std::string name;
+    
+    // Texture coordinates scale/offset
+    float uvScaleX = 1.0f;
+    float uvScaleY = 1.0f;
+    float uvOffsetX = 0.0f;
+    float uvOffsetY = 0.0f;
 };
 
 struct Entity {
@@ -152,14 +171,36 @@ struct Map {
     std::string author = "Unknown";
     std::vector<Brush> brushes;
     std::vector<Entity> entities;
+    std::unordered_map<uint32_t, Texture> textures; // ID -> Texture
     uint32_t nextBrushID = 1;
     uint32_t nextEntityID = 1;
+    uint32_t nextTextureID = 1;
     
     void Clear() {
         brushes.clear();
         entities.clear();
+        textures.clear();
         nextBrushID = 1;
         nextEntityID = 1;
+        nextTextureID = 1;
+    }
+    
+    // Texture management
+    uint32_t AddTexture(const Texture& tex) {
+        Texture newTex = tex;
+        newTex.id = nextTextureID++;
+        textures[newTex.id] = newTex;
+        return newTex.id;
+    }
+    
+    Texture* GetTexture(uint32_t id) {
+        auto it = textures.find(id);
+        return (it != textures.end()) ? &it->second : nullptr;
+    }
+    
+    const Texture* GetTexture(uint32_t id) const {
+        auto it = textures.find(id);
+        return (it != textures.end()) ? &it->second : nullptr;
     }
 };
 
