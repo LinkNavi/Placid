@@ -13,7 +13,9 @@ EditorApp::EditorApp()
     : window(nullptr), mapEditor(nullptr), renderer(nullptr), gameMode(nullptr),
       currentMode(EditorMode::EDIT),
       editorCamDist(30.0f), editorCamYaw(0.45f), editorCamPitch(0.6f),
-      editorCamTarget(0, 0, 0), lastX(640), lastY(360), firstMouse(true), lastFrame(0) {}
+      editorCamTarget(0, 0, 0), lastX(640), lastY(360), firstMouse(true), 
+      dragAccumX(0), dragAccumZ(0), isLeftDragging(false),  // <-- ADD THIS
+      lastFrame(0) {}
 
 EditorApp::~EditorApp() {
     Shutdown();
@@ -362,6 +364,11 @@ void EditorApp::MouseButtonCallback(GLFWwindow* window, int button, int action, 
     
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
+            // Start dragging - reset accumulator
+            app->dragAccumX = 0;
+            app->dragAccumZ = 0;
+            app->isLeftDragging = true;
+            
             int width, height;
             glfwGetWindowSize(window, &width, &height);
             
@@ -378,7 +385,10 @@ void EditorApp::MouseButtonCallback(GLFWwindow* window, int button, int action, 
             
             bool shift = mods & GLFW_MOD_SHIFT;
             app->mapEditor->OnMouseClick(worldX, gridY, worldZ, shift);
+            
         } else if (action == GLFW_RELEASE) {
+            // Stop dragging
+            app->isLeftDragging = false;
             app->mapEditor->OnMouseRelease();
         }
     }
@@ -440,23 +450,41 @@ void EditorApp::MouseCallback(GLFWwindow* window, double xpos, double ypos) {
         }
         
         // Drag for manipulation or creation
-        if (app->mapEditor && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-            int width, height;
-            glfwGetWindowSize(window, &width, &height);
+        if (app->mapEditor && app->isLeftDragging) {
+            // Convert screen delta to world delta based on camera
+            float moveScale = app->editorCamDist * 0.005f;
             
-            float ndcX = (2.0f * xpos / width) - 1.0f;
-            float ndcY = 1.0f - (2.0f * ypos / height);
+            float screenDX = dx;
+            float screenDY = dy;
+            
+            // Convert to camera-relative world delta
+            float cosYaw = cos(app->editorCamYaw);
+            float sinYaw = sin(app->editorCamYaw);
+            
+            // Right = perpendicular to forward
+            float rightX = -sinYaw;
+            float rightZ = cosYaw;
+            
+            // Forward = camera forward (projected on XZ)
+            float forwardX = cosYaw;
+            float forwardZ = sinYaw;
+            
+            // Combine: mouse right = world right, mouse up = world forward
+            float worldDX = (screenDX * rightX - screenDY * forwardX) * moveScale;
+            float worldDZ = (screenDX * rightZ - screenDY * forwardZ) * moveScale;
             
             auto& settings = app->mapEditor->GetSettings();
             float gridY = settings.gridHeight;
-            float worldX = app->editorCamTarget.x + ndcX * app->editorCamDist * 0.5f;
-            float worldZ = app->editorCamTarget.z + ndcY * app->editorCamDist * 0.5f;
+            
+            // Accumulate in member variables
+            app->dragAccumX += worldDX;
+            app->dragAccumZ += worldDZ;
             
             bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
                          glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-            app->mapEditor->OnMouseDrag(worldX, gridY, worldZ, dx, dy, shift);
+            
+            app->mapEditor->OnMouseDrag(app->dragAccumX, gridY, app->dragAccumZ, 
+                                       screenDX, screenDY, shift);
         }
     }
-}
-
-} // namespace Editor
+}} // namespace Editor

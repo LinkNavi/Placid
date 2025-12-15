@@ -78,7 +78,35 @@ set(PLACID_SOURCES
 
 # Main executable
 add_executable(placid ${PLACID_SOURCES})
+add_executable(test_network
+    src/test_network.cpp
+)
 
+target_include_directories(test_network PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_network PRIVATE
+    # Add any required libraries (probably none for this test)
+)
+
+# Copy to bin directory
+set_target_properties(test_network PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
+# Add after test_network executable
+add_executable(simple_hero_test
+    src/simple_hero_test.cpp
+)
+
+target_include_directories(simple_hero_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+set_target_properties(simple_hero_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
 # Make sure the executable can find your local headers
 target_include_directories(placid PRIVATE ${CMAKE_SOURCE_DIR}/include)
 

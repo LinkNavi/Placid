@@ -31,7 +31,10 @@ private:
     float editorCamYaw;
     float editorCamPitch;
     Vec3 editorCamTarget;  // Using Camera.h Vec3
-    
+     // Drag state tracking
+    float dragAccumX;
+    float dragAccumZ;
+    bool isLeftDragging;
     // Mouse state
     double lastX, lastY;
     bool firstMouse;

@@ -228,7 +228,7 @@ void RenderToolbar() {
     }
     
     if (state.currentTool == PCD::EditorTool::ROTATE) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec2(0.2f, 0.5f, 0.8f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.8f, 1.0f));
     }
     if (ImGui::Button("3-Rotate", ImVec2(60, 35))) state.currentTool = PCD::EditorTool::ROTATE;
     if (state.currentTool == PCD::EditorTool::ROTATE) {

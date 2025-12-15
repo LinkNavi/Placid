@@ -143,17 +143,36 @@ public:
     }
 
 private:
+    // Base case - no more arguments
     static void EncodeArgs(std::vector<uint8_t>& data) {}
     
+    // Specialization for std::string - already a string, just insert
+    template<typename... Args>
+    static void EncodeArgs(std::vector<uint8_t>& data, const std::string& arg, Args... args) {
+        data.insert(data.end(), arg.begin(), arg.end());
+        data.push_back(';');
+        EncodeArgs(data, args...);
+    }
+    
+    // Specialization for const char* - convert to string
+    template<typename... Args>
+    static void EncodeArgs(std::vector<uint8_t>& data, const char* arg, Args... args) {
+        std::string str(arg);
+        data.insert(data.end(), str.begin(), str.end());
+        data.push_back(';');
+        EncodeArgs(data, args...);
+    }
+    
+    // Generic template for numeric types (int, float, etc)
     template<typename T, typename... Args>
-    static void EncodeArgs(std::vector<uint8_t>& data, T arg, Args... args) {
+    static typename std::enable_if<std::is_arithmetic<T>::value, void>::type
+    EncodeArgs(std::vector<uint8_t>& data, T arg, Args... args) {
         std::string str = std::to_string(arg);
         data.insert(data.end(), str.begin(), str.end());
         data.push_back(';');
         EncodeArgs(data, args...);
     }
 };
-
 // Initialize static members
 const std::string MagicWords::MOVE = "MV";
 const std::string MagicWords::ATTACK = "ATK";

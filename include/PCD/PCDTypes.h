@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cmath>
 
 namespace PCD {
 
@@ -57,6 +58,47 @@ struct Vec3 {
     float x = 0, y = 0, z = 0;
     Vec3() = default;
     Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
+    
+    // Add arithmetic operators
+    Vec3 operator+(const Vec3& v) const { 
+        return Vec3(x + v.x, y + v.y, z + v.z); 
+    }
+    
+    Vec3 operator-(const Vec3& v) const { 
+        return Vec3(x - v.x, y - v.y, z - v.z); 
+    }
+    
+    Vec3 operator*(float s) const { 
+        return Vec3(x * s, y * s, z * s); 
+    }
+    
+    Vec3 operator/(float s) const { 
+        return Vec3(x / s, y / s, z / s); 
+    }
+    
+    Vec3& operator+=(const Vec3& v) {
+        x += v.x; y += v.y; z += v.z;
+        return *this;
+    }
+    
+    Vec3& operator-=(const Vec3& v) {
+        x -= v.x; y -= v.y; z -= v.z;
+        return *this;
+    }
+    
+    Vec3& operator*=(float s) {
+        x *= s; y *= s; z *= s;
+        return *this;
+    }
+    
+    float Length() const {
+        return std::sqrt(x * x + y * y + z * z);
+    }
+    
+    Vec3 Normalized() const {
+        float len = Length();
+        return len > 0 ? Vec3(x / len, y / len, z / len) : Vec3(0, 0, 0);
+    }
 };
 
 struct Vec2 {

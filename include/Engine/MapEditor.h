@@ -16,15 +16,25 @@ private:
     
     // Manipulation state
     bool isManipulating;
+    bool isDragging;
     GizmoAxis activeAxis;
     PCD::Vec3 manipulationStart;
     PCD::Vec3 objectStartPos;
     PCD::Vec3 objectStartScale;
     PCD::Vec3 objectStartRot;
-    float manipulationStartDist;
+    
+    // Mouse tracking for smooth dragging
+    float startMouseX, startMouseY;
+    float lastMouseX, lastMouseY;
+    
+    // Store brush bounds for scaling
+    struct BrushBounds {
+        PCD::Vec3 min, max, center;
+    };
 
 public:
-    explicit MapEditor() : isManipulating(false), activeAxis(GizmoAxis::NONE), manipulationStartDist(0) {
+    explicit MapEditor() : isManipulating(false), isDragging(false), activeAxis(GizmoAxis::NONE),
+                          startMouseX(0), startMouseY(0), lastMouseX(0), lastMouseY(0) {
         ui = new PCD::EditorUI(state);
         state.map.name = "NewMap";
         state.map.author = "Unknown";
@@ -61,11 +71,16 @@ public:
     void DeleteSelected() { state.DeleteSelected(); }
     void DuplicateSelected() { state.DuplicateSelected(); }
     void SelectAll() { state.SelectAll(); }
-    void DeselectAll() { state.DeselectAll(); isManipulating = false; }
+    void DeselectAll() { 
+        state.DeselectAll(); 
+        isManipulating = false;
+        isDragging = false;
+    }
     
     void SetTool(PCD::EditorTool tool) { 
         state.currentTool = tool; 
         isManipulating = false;
+        isDragging = false;
     }
     
     PCD::Vec3 GetSelectedObjectPosition() const {
@@ -90,6 +105,29 @@ public:
         return PCD::Vec3(0, 0, 0);
     }
     
+    BrushBounds GetBrushBounds(const PCD::Brush& brush) const {
+        BrushBounds bounds;
+        if (brush.vertices.empty()) return bounds;
+        
+        bounds.min = brush.vertices[0].position;
+        bounds.max = brush.vertices[0].position;
+        
+        for (const auto& v : brush.vertices) {
+            bounds.min.x = std::min(bounds.min.x, v.position.x);
+            bounds.min.y = std::min(bounds.min.y, v.position.y);
+            bounds.min.z = std::min(bounds.min.z, v.position.z);
+            bounds.max.x = std::max(bounds.max.x, v.position.x);
+            bounds.max.y = std::max(bounds.max.y, v.position.y);
+            bounds.max.z = std::max(bounds.max.z, v.position.z);
+        }
+        
+        bounds.center.x = (bounds.min.x + bounds.max.x) * 0.5f;
+        bounds.center.y = (bounds.min.y + bounds.max.y) * 0.5f;
+        bounds.center.z = (bounds.min.z + bounds.max.z) * 0.5f;
+        
+        return bounds;
+    }
+    
     void OnMouseClick(float worldX, float worldY, float worldZ, bool shift) {
         PCD::Vec3 clickPos(worldX, worldY, worldZ);
         
@@ -97,32 +135,39 @@ public:
             clickPos = state.SnapToGrid(clickPos);
         }
         
-        // Check if clicking on gizmo
-        if (state.currentTool == PCD::EditorTool::MOVE || 
-            state.currentTool == PCD::EditorTool::ROTATE || 
-            state.currentTool == PCD::EditorTool::SCALE) {
+        // Check if we're using a manipulation tool and have something selected
+        if ((state.currentTool == PCD::EditorTool::MOVE || 
+             state.currentTool == PCD::EditorTool::ROTATE || 
+             state.currentTool == PCD::EditorTool::SCALE) &&
+            (state.selectedBrushIndex >= 0 || state.selectedEntityIndex >= 0)) {
             
-            if (state.selectedBrushIndex >= 0 || state.selectedEntityIndex >= 0) {
-                PCD::Vec3 objPos = GetSelectedObjectPosition();
-                GizmoAxis axis = HitTestGizmo(clickPos, objPos);
-                
-                if (axis != GizmoAxis::NONE) {
-                    isManipulating = true;
-                    activeAxis = axis;
-                    manipulationStart = clickPos;
-                    objectStartPos = objPos;
-                    
-                    // Store initial state for manipulation
-                    if (state.selectedEntityIndex >= 0) {
-                        auto& ent = state.map.entities[state.selectedEntityIndex];
-                        objectStartScale = ent.scale;
-                        objectStartRot = ent.rotation;
-                    }
-                    
-                    state.PushUndo();
-                    return;
-                }
+            // Start manipulation
+            isManipulating = true;
+            isDragging = false; // Will be set to true on first drag
+            activeAxis = shift ? GizmoAxis::XZ : GizmoAxis::XYZ; // Default behavior
+            manipulationStart = clickPos;
+            objectStartPos = GetSelectedObjectPosition();
+            
+            // Store initial mouse position
+            startMouseX = worldX;
+            startMouseY = worldY;
+            lastMouseX = worldX;
+            lastMouseY = worldY;
+            
+            // Store initial state
+            if (state.selectedEntityIndex >= 0 && state.selectedEntityIndex < (int)state.map.entities.size()) {
+                auto& ent = state.map.entities[state.selectedEntityIndex];
+                objectStartScale = ent.scale;
+                objectStartRot = ent.rotation;
+            } else if (state.selectedBrushIndex >= 0 && state.selectedBrushIndex < (int)state.map.brushes.size()) {
+                // Store brush bounds for scaling
+                auto& brush = state.map.brushes[state.selectedBrushIndex];
+                BrushBounds bounds = GetBrushBounds(brush);
+                objectStartPos = bounds.center;
             }
+            
+            state.PushUndo();
+            return;
         }
         
         // Tool-specific behavior
@@ -150,6 +195,9 @@ public:
                 break;
                 
             case PCD::EditorTool::SELECT:
+            case PCD::EditorTool::MOVE:
+            case PCD::EditorTool::ROTATE:
+            case PCD::EditorTool::SCALE:
                 if (!shift) {
                     state.DeselectAll();
                 }
@@ -164,6 +212,7 @@ public:
                     
                     if (dist < 2.0f) {
                         state.selectedEntityIndex = i;
+                        state.selectedBrushIndex = -1;
                         return;
                     }
                 }
@@ -173,21 +222,12 @@ public:
                     auto& brush = state.map.brushes[i];
                     
                     if (!brush.vertices.empty()) {
-                        float minX = brush.vertices[0].position.x;
-                        float maxX = minX;
-                        float minZ = brush.vertices[0].position.z;
-                        float maxZ = minZ;
+                        BrushBounds bounds = GetBrushBounds(brush);
                         
-                        for (auto& v : brush.vertices) {
-                            minX = std::min(minX, v.position.x);
-                            maxX = std::max(maxX, v.position.x);
-                            minZ = std::min(minZ, v.position.z);
-                            maxZ = std::max(maxZ, v.position.z);
-                        }
-                        
-                        if (clickPos.x >= minX && clickPos.x <= maxX &&
-                            clickPos.z >= minZ && clickPos.z <= maxZ) {
+                        if (clickPos.x >= bounds.min.x && clickPos.x <= bounds.max.x &&
+                            clickPos.z >= bounds.min.z && clickPos.z <= bounds.max.z) {
                             state.selectedBrushIndex = i;
+                            state.selectedEntityIndex = -1;
                             return;
                         }
                     }
@@ -199,62 +239,75 @@ public:
         }
     }
     
-    void OnMouseDrag(float worldX, float worldY, float worldZ, float dx, float dy, bool constrainAxis) {
+    void OnMouseDrag(float worldX, float worldY, float worldZ, float screenDX, float screenDY, bool constrainAxis) {
         PCD::Vec3 dragPos(worldX, worldY, worldZ);
         
-        if (isManipulating) {
-            PCD::Vec3 delta = dragPos - manipulationStart;
+        // Handle manipulation (move/rotate/scale)
+        if (isManipulating && (state.currentTool == PCD::EditorTool::MOVE ||
+                               state.currentTool == PCD::EditorTool::ROTATE ||
+                               state.currentTool == PCD::EditorTool::SCALE)) {
             
-            // Constrain to axis
-            if (constrainAxis || activeAxis != GizmoAxis::XYZ) {
-                switch (activeAxis) {
-                    case GizmoAxis::X:
-                        delta.y = 0; delta.z = 0;
-                        break;
-                    case GizmoAxis::Y:
-                        delta.x = 0; delta.z = 0;
-                        break;
-                    case GizmoAxis::Z:
-                        delta.x = 0; delta.y = 0;
-                        break;
-                    case GizmoAxis::XY:
-                        delta.z = 0;
-                        break;
-                    case GizmoAxis::XZ:
-                        delta.y = 0;
-                        break;
-                    case GizmoAxis::YZ:
-                        delta.x = 0;
-                        break;
-                    default:
-                        break;
-                }
+            isDragging = true;
+            
+            // Use screen-space delta for more predictable movement
+            float mouseDeltaX = worldX - lastMouseX;
+            float mouseDeltaY = worldY - lastMouseY;
+            float mouseDeltaZ = worldZ - lastMouseZ;
+            
+            lastMouseX = worldX;
+            lastMouseY = worldY;
+            lastMouseZ = worldZ;
+            
+            PCD::Vec3 delta(mouseDeltaX, mouseDeltaY, mouseDeltaZ);
+            
+            // Apply axis constraints
+            if (constrainAxis) {
+                // When shift is held, constrain to XZ plane (no Y movement)
+                delta.y = 0;
             }
             
+            // Apply grid snapping to delta
             if (state.settings.snapToGrid) {
-                delta.x = std::round(delta.x / state.settings.gridSize) * state.settings.gridSize;
-                delta.y = std::round(delta.y / state.settings.gridSize) * state.settings.gridSize;
-                delta.z = std::round(delta.z / state.settings.gridSize) * state.settings.gridSize;
+                float threshold = state.settings.gridSize * 0.5f;
+                if (fabs(delta.x) > threshold) {
+                    delta.x = std::round(delta.x / state.settings.gridSize) * state.settings.gridSize;
+                } else {
+                    delta.x = 0;
+                }
+                if (fabs(delta.y) > threshold) {
+                    delta.y = std::round(delta.y / state.settings.gridSize) * state.settings.gridSize;
+                } else {
+                    delta.y = 0;
+                }
+                if (fabs(delta.z) > threshold) {
+                    delta.z = std::round(delta.z / state.settings.gridSize) * state.settings.gridSize;
+                } else {
+                    delta.z = 0;
+                }
             }
             
             switch (state.currentTool) {
                 case PCD::EditorTool::MOVE:
-                    ApplyMove(delta);
+                    if (delta.x != 0 || delta.y != 0 || delta.z != 0) {
+                        ApplyMove(delta);
+                        state.hasUnsavedChanges = true;
+                    }
                     break;
                     
                 case PCD::EditorTool::ROTATE:
-                    ApplyRotation(dx, dy);
+                    ApplyRotation(screenDX, screenDY);
+                    state.hasUnsavedChanges = true;
                     break;
                     
                 case PCD::EditorTool::SCALE:
-                    ApplyScale(delta);
+                    ApplyScale(screenDX, screenDY);
+                    state.hasUnsavedChanges = true;
                     break;
                     
                 default:
                     break;
             }
             
-            state.hasUnsavedChanges = true;
             return;
         }
         
@@ -270,6 +323,7 @@ public:
     void OnMouseRelease() {
         if (isManipulating) {
             isManipulating = false;
+            isDragging = false;
             activeAxis = GizmoAxis::NONE;
             return;
         }
@@ -351,89 +405,72 @@ public:
     }
 
 private:
-    GizmoAxis HitTestGizmo(const PCD::Vec3& clickPos, const PCD::Vec3& gizmoPos) {
-        float threshold = 0.5f;
-        PCD::Vec3 delta = clickPos - gizmoPos;
-        
-        // Test axes
-        if (fabs(delta.y) < threshold && fabs(delta.z) < threshold && delta.x > 0 && delta.x < 3.0f)
-            return GizmoAxis::X;
-        if (fabs(delta.x) < threshold && fabs(delta.z) < threshold && delta.y > 0 && delta.y < 3.0f)
-            return GizmoAxis::Y;
-        if (fabs(delta.x) < threshold && fabs(delta.y) < threshold && delta.z > 0 && delta.z < 3.0f)
-            return GizmoAxis::Z;
-        
-        // Test center (all axes)
-        float dist = sqrt(delta.x*delta.x + delta.y*delta.y + delta.z*delta.z);
-        if (dist < threshold) return GizmoAxis::XYZ;
-        
-        return GizmoAxis::NONE;
-    }
+    float lastMouseZ = 0; // Add this member
     
     void ApplyMove(const PCD::Vec3& delta) {
+        // Move entity
         if (state.selectedEntityIndex >= 0 && state.selectedEntityIndex < (int)state.map.entities.size()) {
             auto& ent = state.map.entities[state.selectedEntityIndex];
-            ent.position = objectStartPos + delta;
+            ent.position = ent.position + delta;
         }
         
+        // Move brush - move all vertices by delta
         if (state.selectedBrushIndex >= 0 && state.selectedBrushIndex < (int)state.map.brushes.size()) {
             auto& brush = state.map.brushes[state.selectedBrushIndex];
-            PCD::Vec3 center = objectStartPos;
             
             for (auto& v : brush.vertices) {
-                PCD::Vec3 offset(
-                    v.position.x - center.x,
-                    v.position.y - center.y,
-                    v.position.z - center.z
-                );
-                v.position.x = center.x + offset.x + delta.x;
-                v.position.y = center.y + offset.y + delta.y;
-                v.position.z = center.z + offset.z + delta.z;
+                v.position = v.position + delta;
             }
         }
     }
     
-    void ApplyRotation(float dx, float dy) {
+    void ApplyRotation(float screenDX, float screenDY) {
         if (state.selectedEntityIndex >= 0 && state.selectedEntityIndex < (int)state.map.entities.size()) {
             auto& ent = state.map.entities[state.selectedEntityIndex];
             
-            switch (activeAxis) {
-                case GizmoAxis::X:
-                    ent.rotation.x = objectStartRot.x + dy * 0.5f;
-                    break;
-                case GizmoAxis::Y:
-                    ent.rotation.y = objectStartRot.y + dx * 0.5f;
-                    break;
-                case GizmoAxis::Z:
-                    ent.rotation.z = objectStartRot.z + dx * 0.5f;
-                    break;
-                default:
-                    ent.rotation.y = objectStartRot.y + dx * 0.5f;
-                    break;
-            }
+            float rotSpeed = 0.5f;
+            
+            // Rotate based on mouse movement
+            ent.rotation.y += screenDX * rotSpeed;
+            ent.rotation.x += screenDY * rotSpeed;
         }
     }
     
-    void ApplyScale(const PCD::Vec3& delta) {
+    void ApplyScale(float screenDX, float screenDY) {
+        // Calculate scale factor from mouse movement
+        float scaleDelta = (screenDX + screenDY) * 0.01f;
+        float scaleFactor = 1.0f + scaleDelta;
+        
+        // Clamp scale factor to reasonable range
+        scaleFactor = std::max(0.5f, std::min(2.0f, scaleFactor));
+        
+        // Scale entity
         if (state.selectedEntityIndex >= 0 && state.selectedEntityIndex < (int)state.map.entities.size()) {
             auto& ent = state.map.entities[state.selectedEntityIndex];
-            float scaleFactor = 1.0f + (delta.x + delta.y + delta.z) * 0.1f;
             
-            switch (activeAxis) {
-                case GizmoAxis::X:
-                    ent.scale.x = std::max(0.1f, objectStartScale.x * (1.0f + delta.x * 0.1f));
-                    break;
-                case GizmoAxis::Y:
-                    ent.scale.y = std::max(0.1f, objectStartScale.y * (1.0f + delta.y * 0.1f));
-                    break;
-                case GizmoAxis::Z:
-                    ent.scale.z = std::max(0.1f, objectStartScale.z * (1.0f + delta.z * 0.1f));
-                    break;
-                default:
-                    ent.scale.x = std::max(0.1f, objectStartScale.x * scaleFactor);
-                    ent.scale.y = std::max(0.1f, objectStartScale.y * scaleFactor);
-                    ent.scale.z = std::max(0.1f, objectStartScale.z * scaleFactor);
-                    break;
+            ent.scale.x = std::max(0.1f, ent.scale.x * scaleFactor);
+            ent.scale.y = std::max(0.1f, ent.scale.y * scaleFactor);
+            ent.scale.z = std::max(0.1f, ent.scale.z * scaleFactor);
+        }
+        
+        // Scale brush by moving vertices relative to center
+        if (state.selectedBrushIndex >= 0 && state.selectedBrushIndex < (int)state.map.brushes.size()) {
+            auto& brush = state.map.brushes[state.selectedBrushIndex];
+            
+            // Get current center
+            BrushBounds bounds = GetBrushBounds(brush);
+            PCD::Vec3 center = bounds.center;
+            
+            // Scale each vertex relative to center
+            for (auto& v : brush.vertices) {
+                // Get offset from center
+                PCD::Vec3 offset = v.position - center;
+                
+                // Scale offset
+                offset = offset * scaleFactor;
+                
+                // Apply back
+                v.position = center + offset;
             }
         }
     }
