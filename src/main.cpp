@@ -1,4 +1,4 @@
-// main.cpp - Fixed with proper includes
+// main.cpp - Fixed with proper game start synchronization
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -131,11 +131,35 @@ int main() {
                 
                 Game::LobbyAction action = lobby->Render();
                 
-                if (action == Game::LobbyAction::START_GAME) {
+                // Check if client should start game (received GAME_START from host)
+                if (!netManager.IsHost() && lobby->ShouldStartGame()) {
+                    std::cout << "[MAIN] Client starting game...\n";
+                    lobby->ResetStartFlag();
+                    
+                    gameScene = std::make_unique<Game::GameScene>(window, &netManager);
+                    
+                    // Get the map name from the loaded map
+                    const PCD::Map& map = netManager.GetMap();
+                    std::string mapName = map.name.empty() ? "Unknown Map" : map.name;
+                    
+                    gameScene->Start(mapName);
+                    currentState = GameState::PLAYING;
+                    lobby.reset();
+                }
+                else if (action == Game::LobbyAction::START_GAME) {
                     std::string mapName = lobby->GetSelectedMap();
                     
-                    netManager.SendGameStart(mapName);
+                    // Host: Send game start message to all clients
+                    if (netManager.IsHost()) {
+                        std::cout << "[MAIN] Host starting game with map: " << mapName << "\n";
+                        netManager.SendGameStart(mapName);
+                        
+                        // Small delay to ensure message is sent
+                        netManager.Update(0.016f);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    }
                     
+                    // Both host and client: start the game scene
                     gameScene = std::make_unique<Game::GameScene>(window, &netManager);
                     gameScene->Start(mapName);
                     currentState = GameState::PLAYING;
@@ -157,7 +181,8 @@ int main() {
                     gameScene->Render();
                 }
                 
-                if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+                // Check for quit with F10 (ESC toggles cursor)
+                if (glfwGetKey(window, GLFW_KEY_F10) == GLFW_PRESS) {
                     if (gameScene) {
                         gameScene->Stop();
                         gameScene.reset();

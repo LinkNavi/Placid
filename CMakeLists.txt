@@ -47,6 +47,7 @@ add_executable(placid
     src/EditorApp.cpp
     src/GameMode.cpp
     src/Renderer.cpp
+    src/LocalPlayer.cpp
     src/GameScene.cpp
     ${IMGUI_SOURCES}
     ${GLAD_SOURCES}

@@ -1,4 +1,4 @@
-// GameScene.h - Fixed for ENet NetworkManager
+// GameScene.h - Fixed for rendering remote players
 
 #pragma once
 #include <glad/gl.h>
@@ -57,6 +57,7 @@ private:
     void OnPlayerJoin(uint32_t playerId, const std::string& name);
     void OnPlayerLeave(uint32_t playerId);
     void RenderHUD();
+    void RenderRemotePlayers(float* view, float* proj);
 };
 
 } // namespace Game

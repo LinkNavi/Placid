@@ -1,4 +1,4 @@
-// Lobby.h - Fixed callback signature
+// Lobby.h - Fixed callback signature and game start handling
 
 #pragma once
 
@@ -30,6 +30,7 @@ private:
     bool scrollToBottom;
     
     bool waitingForMap;
+    bool shouldStartGame;
 
 public:
     Lobby(Network::NetworkManager* net, bool host) 
@@ -38,6 +39,7 @@ public:
         , selectedMapIndex(0)
         , scrollToBottom(false)
         , waitingForMap(false)
+        , shouldStartGame(false)
     {
         memset(chatInputBuffer, 0, sizeof(chatInputBuffer));
         
@@ -49,7 +51,7 @@ public:
             availableMaps.push_back("maps/test.pcd");
         }
         
-        // Fixed: Use correct callback signature (no fromIP, fromPort)
+        // Setup message callback
         netManager->SetMessageCallback([this](const std::string& msgType, 
                                               const std::vector<std::string>& args) {
             if (msgType == "CHAT_MESSAGE" && args.size() >= 2) {
@@ -64,6 +66,13 @@ public:
                 }
                 
                 AddChatMessage(senderName + ": " + message);
+            }
+            else if (msgType == "GAME_START" && args.size() >= 1) {
+                // Client received game start from host
+                std::string mapName = args[0];
+                std::cout << "[LOBBY] Received GAME_START: " << mapName << "\n";
+                AddChatMessage("[System] Host is starting the game!");
+                shouldStartGame = true;
             }
         });
         
@@ -245,6 +254,9 @@ public:
         }
         return availableMaps[selectedMapIndex];
     }
+    
+    bool ShouldStartGame() const { return shouldStartGame; }
+    void ResetStartFlag() { shouldStartGame = false; }
     
     void AddChatMessage(const std::string& message) {
         chatMessages.push_back(message);

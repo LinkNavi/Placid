@@ -1,4 +1,4 @@
-// NetworkManager.h - Complete ENet implementation
+// NetworkManager.h - Fixed to include host in client's player list
 
 #pragma once
 
@@ -107,7 +107,7 @@ public:
         clients[localPlayerId] = info;
         
         std::cout << "[NET] Host started on port " << port << "\n";
-        std::cout << "[NET] Player ID: " << localPlayerId << "\n";
+        std::cout << "[NET] Player ID: " << localPlayerId << " Name: " << playerName << "\n";
         return true;
     }
     
@@ -407,7 +407,7 @@ private:
             
             std::cout << "[NET] Player joined: " << name << " (ID: " << newId << ")\n";
             
-            // Send player ID
+            // Send player ID to the new player
             std::vector<uint8_t> response;
             response.push_back((uint8_t)MessageType::PLAYER_JOIN);
             response.push_back((newId >> 24) & 0xFF);
@@ -419,6 +419,20 @@ private:
             ENetPacket* packet = enet_packet_create(response.data(), response.size(),
                                                    ENET_PACKET_FLAG_RELIABLE);
             enet_peer_send(peer, 0, packet);
+            
+            // IMPORTANT: Send info about the HOST to the new player
+            ClientInfo& hostInfo = clients[localPlayerId];
+            std::vector<uint8_t> hostData;
+            hostData.push_back((uint8_t)MessageType::PLAYER_JOIN);
+            hostData.push_back((localPlayerId >> 24) & 0xFF);
+            hostData.push_back((localPlayerId >> 16) & 0xFF);
+            hostData.push_back((localPlayerId >> 8) & 0xFF);
+            hostData.push_back(localPlayerId & 0xFF);
+            hostData.insert(hostData.end(), hostInfo.name.begin(), hostInfo.name.end());
+            
+            ENetPacket* hostPacket = enet_packet_create(hostData.data(), hostData.size(),
+                                                        ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(peer, 0, hostPacket);
             
             // Send info about all other players to new player
             for (const auto& [id, client] : clients) {
@@ -437,7 +451,7 @@ private:
                 }
             }
             
-            // Notify other clients
+            // Notify other clients about the new player
             for (const auto& [id, client] : clients) {
                 if (id != newId && id != localPlayerId && client.peer) {
                     ENetPacket* p = enet_packet_create(response.data(), response.size(),
