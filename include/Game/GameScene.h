@@ -1,7 +1,7 @@
 // GameScene.h - Fixed for ENet NetworkManager
 
 #pragma once
-
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include "Network/NetworkManager.h"
