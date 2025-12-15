@@ -39,7 +39,6 @@ Renderer::~Renderer() {
 }
 
 bool Renderer::Initialize() {
-    // Compile shaders
     GLuint vs = CompileShader(GL_VERTEX_SHADER, vertexShaderSrc);
     GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
     
@@ -60,7 +59,6 @@ bool Renderer::Initialize() {
     glDeleteShader(vs);
     glDeleteShader(fs);
     
-    // Create buffers
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glGenBuffers(1, &ebo);
@@ -104,23 +102,24 @@ void Renderer::RenderGrid(const PCD::EditorSettings& settings, const PCD::Vec3& 
     float step = settings.gridSize;
     float y = settings.gridHeight;
     
-    // Grid lines
     for (float x = -extent; x <= extent; x += step) {
-        gridVerts.insert(gridVerts.end(), {x, y, -extent, 0.3f, 0.3f, 0.3f});
-        gridVerts.insert(gridVerts.end(), {x, y, extent, 0.3f, 0.3f, 0.3f});
+        float brightness = (fabs(x) < 0.01f) ? 0.5f : 0.3f;
+        gridVerts.insert(gridVerts.end(), {x, y, -extent, brightness, brightness, brightness});
+        gridVerts.insert(gridVerts.end(), {x, y, extent, brightness, brightness, brightness});
     }
     for (float z = -extent; z <= extent; z += step) {
-        gridVerts.insert(gridVerts.end(), {-extent, y, z, 0.3f, 0.3f, 0.3f});
-        gridVerts.insert(gridVerts.end(), {extent, y, z, 0.3f, 0.3f, 0.3f});
+        float brightness = (fabs(z) < 0.01f) ? 0.5f : 0.3f;
+        gridVerts.insert(gridVerts.end(), {-extent, y, z, brightness, brightness, brightness});
+        gridVerts.insert(gridVerts.end(), {extent, y, z, brightness, brightness, brightness});
     }
     
-    // Axes (X=red, Z=blue, Y=green)
-    gridVerts.insert(gridVerts.end(), {-extent, y, 0, 1.0f, 0.2f, 0.2f});
-    gridVerts.insert(gridVerts.end(), {extent, y, 0, 1.0f, 0.2f, 0.2f});
-    gridVerts.insert(gridVerts.end(), {0, y, -extent, 0.2f, 0.2f, 1.0f});
-    gridVerts.insert(gridVerts.end(), {0, y, extent, 0.2f, 0.2f, 1.0f});
-    gridVerts.insert(gridVerts.end(), {0, -extent, 0, 0.2f, 1.0f, 0.2f});
-    gridVerts.insert(gridVerts.end(), {0, extent, 0, 0.2f, 1.0f, 0.2f});
+    // Major axes
+    gridVerts.insert(gridVerts.end(), {-extent, y, 0, 1.0f, 0.3f, 0.3f});
+    gridVerts.insert(gridVerts.end(), {extent, y, 0, 1.0f, 0.3f, 0.3f});
+    gridVerts.insert(gridVerts.end(), {0, y, -extent, 0.3f, 0.3f, 1.0f});
+    gridVerts.insert(gridVerts.end(), {0, y, extent, 0.3f, 0.3f, 1.0f});
+    gridVerts.insert(gridVerts.end(), {0, -extent, 0, 0.3f, 1.0f, 0.3f});
+    gridVerts.insert(gridVerts.end(), {0, extent, 0, 0.3f, 1.0f, 0.3f});
     
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -150,12 +149,10 @@ void Renderer::RenderBrushes(const std::vector<PCD::Brush>& brushes, int selecte
         for (const auto& v : brush.vertices) {
             float r = brush.color.x, g = brush.color.y, b = brush.color.z;
             
-            // Highlight selected
             if ((int)i == selectedIdx) {
-                r = 1.0f; g = 0.8f; b = 0.2f;
+                r = 1.0f; g = 0.8f; b = 0.3f;
             }
             
-            // Color by brush type
             if (brush.flags & PCD::BRUSH_TRIGGER) { r = 0.8f; g = 0.2f; b = 0.8f; }
             if (brush.flags & PCD::BRUSH_WATER) { r = 0.2f; g = 0.4f; b = 0.8f; }
             if (brush.flags & PCD::BRUSH_LAVA) { r = 0.9f; g = 0.3f; b = 0.1f; }
@@ -190,7 +187,6 @@ void Renderer::RenderBrushes(const std::vector<PCD::Brush>& brushes, int selecte
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, view);
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, model);
         
-        // Wireframe for selected
         if ((int)i == selectedIdx) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             glLineWidth(2.0f);
@@ -231,22 +227,21 @@ void Renderer::RenderEntities(const std::vector<PCD::Entity>& entities, int sele
         
         float r = 0.5f, g = 0.5f, b = 0.5f;
         
-        // Color by type
         if ((int)i == selectedIdx) {
             r = 1.0f; g = 0.9f; b = 0.3f;
         } else {
             switch (ent.type) {
                 case PCD::ENT_INFO_PLAYER_START:
                 case PCD::ENT_INFO_PLAYER_DEATHMATCH:
-                    r = 0.2f; g = 1.0f; b = 0.2f; break;
+                    r = 0.3f; g = 1.0f; b = 0.3f; break;
                 case PCD::ENT_INFO_TEAM_SPAWN_RED:
                     r = 1.0f; g = 0.2f; b = 0.2f; break;
                 case PCD::ENT_INFO_TEAM_SPAWN_BLUE:
-                    r = 0.2f; g = 0.2f; b = 1.0f; break;
+                    r = 0.2f; g = 0.4f; b = 1.0f; break;
                 case PCD::ENT_LIGHT:
                 case PCD::ENT_LIGHT_SPOT:
                 case PCD::ENT_LIGHT_ENV:
-                    r = 1.0f; g = 1.0f; b = 0.5f; break;
+                    r = 1.0f; g = 1.0f; b = 0.6f; break;
                 case PCD::ENT_ITEM_HEALTH:
                     r = 1.0f; g = 0.3f; b = 0.3f; break;
                 case PCD::ENT_ITEM_ARMOR:
@@ -305,14 +300,14 @@ void Renderer::RenderCreationPreview(const PCD::Vec3& start, const PCD::Vec3& en
     if (maxY - minY < 0.1f) maxY = minY + gridSize * 2;
     
     float previewVerts[] = {
-        minX, minY, minZ,  0.5f, 0.8f, 1.0f,
-        maxX, minY, minZ,  0.5f, 0.8f, 1.0f,
-        maxX, maxY, minZ,  0.5f, 0.8f, 1.0f,
-        minX, maxY, minZ,  0.5f, 0.8f, 1.0f,
-        minX, minY, maxZ,  0.5f, 0.8f, 1.0f,
-        maxX, minY, maxZ,  0.5f, 0.8f, 1.0f,
-        maxX, maxY, maxZ,  0.5f, 0.8f, 1.0f,
-        minX, maxY, maxZ,  0.5f, 0.8f, 1.0f,
+        minX, minY, minZ,  0.5f, 0.9f, 1.0f,
+        maxX, minY, minZ,  0.5f, 0.9f, 1.0f,
+        maxX, maxY, minZ,  0.5f, 0.9f, 1.0f,
+        minX, maxY, minZ,  0.5f, 0.9f, 1.0f,
+        minX, minY, maxZ,  0.5f, 0.9f, 1.0f,
+        maxX, minY, maxZ,  0.5f, 0.9f, 1.0f,
+        maxX, maxY, maxZ,  0.5f, 0.9f, 1.0f,
+        minX, maxY, maxZ,  0.5f, 0.9f, 1.0f,
     };
     
     unsigned int lineIndices[] = {
@@ -344,4 +339,164 @@ void Renderer::RenderCreationPreview(const PCD::Vec3& start, const PCD::Vec3& en
     glLineWidth(2.0f);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
     glLineWidth(1.0f);
+}
+
+void Renderer::RenderGizmo(const PCD::Vec3& position, PCD::EditorTool tool, int activeAxis, float* view, float* proj) {
+    // 0=NONE, 1=X, 2=Y, 3=Z, 4=XY, 5=XZ, 6=YZ, 7=XYZ
+    
+    switch (tool) {
+        case PCD::EditorTool::MOVE:
+            // X axis - Red
+            RenderArrow(position, PCD::Vec3(1, 0, 0), 1.0f, 0.2f, 0.2f, activeAxis == 1, view, proj);
+            // Y axis - Green
+            RenderArrow(position, PCD::Vec3(0, 1, 0), 0.2f, 1.0f, 0.2f, activeAxis == 2, view, proj);
+            // Z axis - Blue
+            RenderArrow(position, PCD::Vec3(0, 0, 1), 0.2f, 0.2f, 1.0f, activeAxis == 3, view, proj);
+            // Center cube
+            RenderCube(position, 0.3f, 1.0f, 1.0f, 1.0f, view, proj);
+            break;
+            
+        case PCD::EditorTool::ROTATE:
+            // Draw rotation circles
+            RenderArrow(position, PCD::Vec3(1, 0, 0), 1.0f, 0.3f, 0.3f, activeAxis == 1, view, proj);
+            RenderArrow(position, PCD::Vec3(0, 1, 0), 0.3f, 1.0f, 0.3f, activeAxis == 2, view, proj);
+            RenderArrow(position, PCD::Vec3(0, 0, 1), 0.3f, 0.3f, 1.0f, activeAxis == 3, view, proj);
+            break;
+            
+        case PCD::EditorTool::SCALE:
+            // X axis - Red
+            RenderArrow(position, PCD::Vec3(1, 0, 0), 1.0f, 0.2f, 0.2f, activeAxis == 1, view, proj);
+            // Y axis - Green
+            RenderArrow(position, PCD::Vec3(0, 1, 0), 0.2f, 1.0f, 0.2f, activeAxis == 2, view, proj);
+            // Z axis - Blue
+            RenderArrow(position, PCD::Vec3(0, 0, 1), 0.2f, 0.2f, 1.0f, activeAxis == 3, view, proj);
+            // Center cube for uniform scale
+            RenderCube(position, 0.4f, 1.0f, 1.0f, 0.3f, view, proj);
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void Renderer::RenderArrow(const PCD::Vec3& pos, const PCD::Vec3& dir, float r, float g, float b, bool highlight, float* view, float* proj) {
+    float length = 3.0f;
+    float thickness = highlight ? 0.15f : 0.08f;
+    
+    if (highlight) {
+        r = 1.0f; g = 1.0f; b = 0.3f;
+    }
+    
+    // Arrow shaft
+    std::vector<float> verts;
+    PCD::Vec3 end = PCD::Vec3(pos.x + dir.x * length, pos.y + dir.y * length, pos.z + dir.z * length);
+    
+    // Line segments to make the shaft visible
+    for (int i = 0; i <= 10; i++) {
+        float t = i / 10.0f;
+        PCD::Vec3 p = PCD::Vec3(pos.x + dir.x * length * t, pos.y + dir.y * length * t, pos.z + dir.z * length * t);
+        verts.insert(verts.end(), {p.x, p.y, p.z, r, g, b});
+    }
+    
+    // Arrow head (cone)
+    float coneLength = 0.5f;
+    float coneRadius = 0.2f;
+    PCD::Vec3 coneStart = PCD::Vec3(end.x - dir.x * coneLength, end.y - dir.y * coneLength, end.z - dir.z * coneLength);
+    
+    // Perpendicular vectors for cone
+    PCD::Vec3 perp1, perp2;
+    if (fabs(dir.x) < 0.9f) {
+        perp1 = PCD::Vec3(0, dir.z, -dir.y);
+    } else {
+        perp1 = PCD::Vec3(-dir.z, 0, dir.x);
+    }
+    float len = sqrt(perp1.x*perp1.x + perp1.y*perp1.y + perp1.z*perp1.z);
+    perp1.x /= len; perp1.y /= len; perp1.z /= len;
+    
+    perp2 = PCD::Vec3(
+        dir.y*perp1.z - dir.z*perp1.y,
+        dir.z*perp1.x - dir.x*perp1.z,
+        dir.x*perp1.y - dir.y*perp1.x
+    );
+    
+    // Cone vertices
+    int segments = 8;
+    for (int i = 0; i < segments; i++) {
+        float angle = 2.0f * 3.14159f * i / segments;
+        float nextAngle = 2.0f * 3.14159f * (i + 1) / segments;
+        
+        PCD::Vec3 p1 = PCD::Vec3(
+            coneStart.x + (perp1.x * cos(angle) + perp2.x * sin(angle)) * coneRadius,
+            coneStart.y + (perp1.y * cos(angle) + perp2.y * sin(angle)) * coneRadius,
+            coneStart.z + (perp1.z * cos(angle) + perp2.z * sin(angle)) * coneRadius
+        );
+        
+        verts.insert(verts.end(), {p1.x, p1.y, p1.z, r, g, b});
+        verts.insert(verts.end(), {end.x, end.y, end.z, r, g, b});
+    }
+    
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_DYNAMIC_DRAW);
+    
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    
+    glUseProgram(shaderProgram);
+    float model[16];
+    SetIdentityMatrix(model);
+    
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, proj);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, view);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, model);
+    
+    glLineWidth(highlight ? 4.0f : 2.0f);
+    glDrawArrays(GL_LINE_STRIP, 0, 11); // Shaft
+    glDrawArrays(GL_LINES, 11, verts.size()/6 - 11); // Cone
+    glLineWidth(1.0f);
+}
+
+void Renderer::RenderCube(const PCD::Vec3& pos, float size, float r, float g, float b, float* view, float* proj) {
+    float s = size * 0.5f;
+    
+    float cubeVerts[] = {
+        pos.x-s, pos.y-s, pos.z-s,  r, g, b,
+        pos.x+s, pos.y-s, pos.z-s,  r, g, b,
+        pos.x+s, pos.y+s, pos.z-s,  r, g, b,
+        pos.x-s, pos.y+s, pos.z-s,  r, g, b,
+        pos.x-s, pos.y-s, pos.z+s,  r, g, b,
+        pos.x+s, pos.y-s, pos.z+s,  r, g, b,
+        pos.x+s, pos.y+s, pos.z+s,  r, g, b,
+        pos.x-s, pos.y+s, pos.z+s,  r, g, b,
+    };
+    
+    unsigned int cubeIndices[] = {
+        0,1,2, 0,2,3, 4,5,6, 4,6,7,
+        0,4,7, 0,7,3, 1,5,6, 1,6,2,
+        3,2,6, 3,6,7, 0,1,5, 0,5,4
+    };
+    
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVerts), cubeVerts, GL_DYNAMIC_DRAW);
+    
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_DYNAMIC_DRAW);
+    
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    
+    glUseProgram(shaderProgram);
+    float model[16];
+    SetIdentityMatrix(model);
+    
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, proj);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, view);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, model);
+    
+    glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
 }
