@@ -17,7 +17,7 @@
 #include <algorithm>
 #include <tuple>
 #include <memory>
-
+#include <functional>
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
@@ -286,7 +286,7 @@ private:
         uint16_t total_fragments;
         std::map<uint16_t, std::vector<uint8_t>> fragments;
         std::chrono::steady_clock::time_point last_update;
-
+FragmentedMessage() : msg_id(0), total_fragments(0), last_update(std::chrono::steady_clock::now()) {}
         FragmentedMessage(uint16_t id, uint16_t total) 
             : msg_id(id), total_fragments(total), last_update(std::chrono::steady_clock::now()) {}
 

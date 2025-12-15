@@ -1,0 +1,95 @@
+// Placid Arena Shooter Entity Definitions
+
+@SolidClass = worldspawn : "World entity"
+[
+    message(string) : "Map title"
+    skyname(string) : "Sky texture"
+    gravity(integer) : "Gravity" : 800
+]
+
+@PointClass size(-16 -16 0, 16 16 56) color(0 255 0) = info_player_start : "Player spawn point"
+[
+    angle(integer) : "Facing angle" : 0
+    team(integer) : "Team (0=any)" : 0
+]
+
+@PointClass size(-16 -16 0, 16 16 56) color(255 255 0) = info_player_deathmatch : "Deathmatch spawn"
+[
+    angle(integer) : "Facing angle" : 0
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(255 128 0) = weapon_rifle : "Rifle pickup"
+[
+    ammo(integer) : "Ammo count" : 30
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(255 128 0) = weapon_shotgun : "Shotgun pickup"
+[
+    ammo(integer) : "Ammo count" : 8
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(255 128 0) = weapon_rocket : "Rocket launcher pickup"
+[
+    ammo(integer) : "Ammo count" : 5
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(0 255 255) = item_health : "Health pack"
+[
+    health(integer) : "Health amount" : 25
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(0 255 255) = item_armor : "Armor pack"
+[
+    armor(integer) : "Armor amount" : 50
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(0 128 255) = item_ammo : "Ammo pack"
+[
+    ammo(integer) : "Ammo count" : 30
+    ammo_type(choices) : "Ammo type" : 0 =
+    [
+        0 : "Rifle"
+        1 : "Shotgun"
+        2 : "Rocket"
+    ]
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(255 255 255) = light : "Light source"
+[
+    light(integer) : "Brightness" : 300
+    color(color255) : "Light color" : "255 255 255"
+    radius(integer) : "Radius" : 100
+]
+
+@SolidClass = func_wall : "Solid wall"
+[
+    texture(string) : "Texture name"
+]
+
+@SolidClass = trigger_teleport : "Teleport trigger"
+[
+    target(string) : "Target destination"
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(128 128 255) = info_teleport_destination : "Teleport destination"
+[
+    targetname(string) : "Name"
+    angle(integer) : "Facing angle" : 0
+]
+
+@SolidClass = trigger_hurt : "Damage trigger"
+[
+    damage(integer) : "Damage per second" : 10
+]
+
+@SolidClass = trigger_push : "Push/jump pad"
+[
+    speed(integer) : "Push force" : 1000
+    angle(integer) : "Push direction" : 90
+]
+
+@PointClass size(-16 -16 -16, 16 16 16) color(255 0 0) = info_flag_red : "Red team flag"
+[]
+
+@PointClass size(-16 -16 -16, 16 16 16) color(0 0 255) = info_flag_blue : "Blue team flag"
+[]
