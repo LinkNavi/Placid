@@ -1,415 +1,348 @@
-// NetworkManager.h - Complete rewrite with all fixes
-// Clean P2P networking with host-authority model
+// NetworkManager.h - Complete ENet implementation
 
 #pragma once
 
-#include "HERO.h"
-#include <cstdint>
+#include <enet/enet.h>
+#include "PCD/PCD.h"
 #include <string>
-#include <vector>
 #include <unordered_map>
-#include <functional>
-#include <chrono>
+#include <vector>
+#include <cstdint>
 #include <iostream>
+#include <functional>
+#include <cstring>
+#include <fstream>
 
 namespace Network {
 
-// Message type constants (2-char codes for MagicWords)
-namespace MessageType {
-    const std::string PLAYER_JOIN = "PJ";
-    const std::string PLAYER_LEAVE = "PL";
-    const std::string PLAYER_STATE = "PS";
-    const std::string PLAYER_SPAWN = "SP";
-    const std::string PLAYER_SHOOT = "SH";
-    const std::string PLAYER_HIT = "HI";
-    const std::string PLAYER_DEATH = "DT";
-    const std::string GAME_START = "GS";
-    const std::string GAME_END = "GE";
-    const std::string MAP_INFO = "MI";
-    const std::string CHAT_MESSAGE = "CH";
-    const std::string PING_REQUEST = "PR";
-    const std::string PING_RESPONSE = "PP";
-}
+enum class MessageType : uint8_t {
+    PLAYER_JOIN = 0,
+    PLAYER_LEAVE = 1,
+    PLAYER_STATE = 2,
+    CHAT_MESSAGE = 3,
+    MAP_REQUEST = 4,
+    MAP_CHUNK = 5,
+    MAP_COMPLETE = 6,
+    GAME_START = 7
+};
 
-// Client info structure
 struct ClientInfo {
     uint32_t playerId;
     std::string name;
-    std::string ipAddress;
-    uint16_t port;
+    ENetPeer* peer;
+    bool hasMap;
     bool isReady;
-    std::chrono::steady_clock::time_point lastSeen;
 };
 
-// Callback types
-using MessageCallback = std::function<void(const std::string& msgType, 
-                                          const std::vector<std::string>& args,
-                                          const std::string& fromIP, 
-                                          uint16_t fromPort)>;
-using PlayerJoinCallback = std::function<void(uint32_t playerId, const std::string& name)>;
-using PlayerLeaveCallback = std::function<void(uint32_t playerId)>;
+using MessageCallback = std::function<void(const std::string&, const std::vector<std::string>&)>;
+using PlayerJoinCallback = std::function<void(uint32_t, const std::string&)>;
+using PlayerLeaveCallback = std::function<void(uint32_t)>;
+using MapLoadedCallback = std::function<void(const PCD::Map&)>;
 
 class NetworkManager {
 private:
-    // Network objects
-    HERO::HeroServer* server;
-    HERO::HeroClient* client;
-    
-    // Connection state
+    ENetHost* host;
+    ENetPeer* serverPeer;
     bool isHost;
     bool isConnected;
-    std::string hostIP;
-    uint16_t port;
     uint32_t localPlayerId;
     uint32_t nextPlayerId;
-    
-    // Clients (host tracks all clients, clients track known players)
     std::unordered_map<uint32_t, ClientInfo> clients;
     
     // Callbacks
     MessageCallback messageCallback;
     PlayerJoinCallback playerJoinCallback;
     PlayerLeaveCallback playerLeaveCallback;
+    MapLoadedCallback mapLoadedCallback;
+    
+    // Map transfer
+    PCD::Map currentMap;
+    std::string currentMapPath;
+    std::vector<uint8_t> receivedMapData;
+    size_t expectedMapSize;
+    size_t chunksReceived;
     
     // Stats
     uint32_t packetsSent;
     uint32_t packetsReceived;
-    float lastPingTime;
-    
-    // Constants
-    static constexpr float PING_INTERVAL = 2.0f;     // Ping every 2 seconds
-    static constexpr float TIMEOUT_DURATION = 10.0f; // Disconnect after 10 seconds
 
 public:
     NetworkManager() 
-        : server(nullptr)
-        , client(nullptr)
-        , isHost(false)
-        , isConnected(false)
-        , port(0)
-        , localPlayerId(0)
-        , nextPlayerId(1)
-        , packetsSent(0)
-        , packetsReceived(0)
-        , lastPingTime(0.0f)
-    {}
+        : host(nullptr), serverPeer(nullptr), isHost(false)
+        , isConnected(false), localPlayerId(0), nextPlayerId(1)
+        , expectedMapSize(0), chunksReceived(0)
+        , packetsSent(0), packetsReceived(0)
+    {
+        if (enet_initialize() != 0) {
+            std::cerr << "[NET] Failed to initialize ENet\n";
+        }
+    }
     
     ~NetworkManager() {
         Disconnect();
+        enet_deinitialize();
     }
     
-    // ====================================================================
-    // CONNECTION MANAGEMENT
-    // ====================================================================
-    
-    bool HostGame(uint16_t hostPort, const std::string& playerName) {
-        if (isConnected) {
-            std::cerr << "[NET] Already connected\n";
+    bool HostGame(uint16_t port, const std::string& playerName) {
+        ENetAddress address;
+        address.host = ENET_HOST_ANY;
+        address.port = port;
+        
+        host = enet_host_create(&address, 32, 2, 0, 0);
+        if (!host) {
+            std::cerr << "[NET] Failed to create host\n";
             return false;
         }
-        
-        std::cout << "[NET] Starting host on port " << hostPort << "...\n";
-        
-        // Create server only - host doesn't need client connection
-        server = new HERO::HeroServer(hostPort);
-        server->Start();
-        
-        // Brief wait for port to bind
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         
         isHost = true;
         isConnected = true;
-        port = hostPort;
         localPlayerId = nextPlayerId++;
-        client = nullptr;
         
-        // Add ourselves to client list
-        ClientInfo hostInfo;
-        hostInfo.playerId = localPlayerId;
-        hostInfo.name = playerName;
-        hostInfo.ipAddress = "127.0.0.1";
-        hostInfo.port = hostPort;
-        hostInfo.isReady = true;
-        hostInfo.lastSeen = std::chrono::steady_clock::now();
-        clients[localPlayerId] = hostInfo;
+        ClientInfo info;
+        info.playerId = localPlayerId;
+        info.name = playerName;
+        info.peer = nullptr;
+        info.hasMap = true;
+        info.isReady = true;
+        clients[localPlayerId] = info;
         
-        std::cout << "[NET] Host started. Player ID: " << localPlayerId << "\n";
-        std::cout << "[NET] Listening on port " << hostPort << "\n";
+        std::cout << "[NET] Host started on port " << port << "\n";
+        std::cout << "[NET] Player ID: " << localPlayerId << "\n";
+        return true;
+    }
+    
+    bool JoinGame(const std::string& serverIP, uint16_t port, const std::string& playerName) {
+        host = enet_host_create(nullptr, 1, 2, 0, 0);
+        if (!host) {
+            std::cerr << "[NET] Failed to create client\n";
+            return false;
+        }
+        
+        ENetAddress address;
+        enet_address_set_host(&address, serverIP.c_str());
+        address.port = port;
+        
+        serverPeer = enet_host_connect(host, &address, 2, 0);
+        if (!serverPeer) {
+            std::cerr << "[NET] Failed to connect\n";
+            enet_host_destroy(host);
+            return false;
+        }
+        
+        std::cout << "[NET] Connecting to " << serverIP << ":" << port << "...\n";
+        
+        ENetEvent event;
+        if (enet_host_service(host, &event, 5000) > 0 && 
+            event.type == ENET_EVENT_TYPE_CONNECT) {
+            
+            std::cout << "[NET] Connected!\n";
+            
+            // Send join request
+            std::vector<uint8_t> data;
+            data.push_back((uint8_t)MessageType::PLAYER_JOIN);
+            data.insert(data.end(), playerName.begin(), playerName.end());
+            
+            ENetPacket* packet = enet_packet_create(data.data(), data.size(), 
+                                                    ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(serverPeer, 0, packet);
+            enet_host_flush(host);
+            
+            // Wait for player ID
+            int attempts = 0;
+            while (attempts++ < 20) {
+                if (enet_host_service(host, &event, 100) > 0) {
+                    if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+                        HandlePacket(event.packet->data, event.packet->dataLength, event.peer);
+                        enet_packet_destroy(event.packet);
+                        
+                        if (localPlayerId != 0) {
+                            isHost = false;
+                            isConnected = true;
+                            return true;
+                        }
+                    }
+                }
+            }
+            
+            std::cerr << "[NET] Failed to get player ID\n";
+            enet_peer_disconnect(serverPeer, 0);
+            enet_host_destroy(host);
+            return false;
+        }
+        
+        std::cerr << "[NET] Connection timeout\n";
+        enet_peer_reset(serverPeer);
+        enet_host_destroy(host);
+        return false;
+    }
+    
+    void Update(float deltaTime) {
+        if (!isConnected || !host) return;
+        
+        ENetEvent event;
+        while (enet_host_service(host, &event, 0) > 0) {
+            switch (event.type) {
+                case ENET_EVENT_TYPE_CONNECT:
+                    std::cout << "[NET] Peer connected\n";
+                    break;
+                    
+                case ENET_EVENT_TYPE_RECEIVE:
+                    packetsReceived++;
+                    HandlePacket(event.packet->data, event.packet->dataLength, event.peer);
+                    enet_packet_destroy(event.packet);
+                    break;
+                    
+                case ENET_EVENT_TYPE_DISCONNECT:
+                    HandleDisconnect(event.peer);
+                    break;
+                    
+                default:
+                    break;
+            }
+        }
+    }
+    
+    bool LoadMap(const std::string& mapPath) {
+        if (!isHost) return false;
+        
+        std::cout << "[NET] Loading map: " << mapPath << "\n";
+        
+        if (!PCD::PCDReader::Load(currentMap, mapPath)) {
+            std::cerr << "[NET] Failed to load map\n";
+            return false;
+        }
+        
+        currentMapPath = mapPath;
+        std::cout << "[NET] Map loaded successfully\n";
+        std::cout << "[NET]   Brushes: " << currentMap.brushes.size() << "\n";
+        std::cout << "[NET]   Entities: " << currentMap.entities.size() << "\n";
         
         return true;
     }
     
-    bool JoinGame(const std::string& serverIP, uint16_t serverPort, const std::string& playerName) {
-        if (isConnected) {
-            std::cerr << "[NET] Already connected\n";
-            return false;
+    const PCD::Map& GetMap() const { return currentMap; }
+    
+    void RequestMap() {
+        if (isHost || !serverPeer) return;
+        
+        std::cout << "[NET] Requesting map...\n";
+        
+        std::vector<uint8_t> data;
+        data.push_back((uint8_t)MessageType::MAP_REQUEST);
+        
+        ENetPacket* packet = enet_packet_create(data.data(), data.size(), 
+                                                ENET_PACKET_FLAG_RELIABLE);
+        enet_peer_send(serverPeer, 0, packet);
+        enet_host_flush(host);
+        packetsSent++;
+    }
+    
+    void SendPlayerState(float x, float y, float z, float yaw, float pitch, int health, int weapon) {
+        if (!isConnected) return;
+        
+        struct __attribute__((packed)) StatePacket {
+            uint8_t type;
+            uint32_t playerId;
+            float x, y, z, yaw, pitch;
+            int32_t health, weapon;
+        } packet;
+        
+        packet.type = (uint8_t)MessageType::PLAYER_STATE;
+        packet.playerId = localPlayerId;
+        packet.x = x;
+        packet.y = y;
+        packet.z = z;
+        packet.yaw = yaw;
+        packet.pitch = pitch;
+        packet.health = health;
+        packet.weapon = weapon;
+        
+        ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 
+                                                     ENET_PACKET_FLAG_UNSEQUENCED);
+        
+        if (isHost) {
+            enet_host_broadcast(host, 1, enetPacket);
+        } else {
+            enet_peer_send(serverPeer, 1, enetPacket);
         }
+        packetsSent++;
+    }
+    
+    void SendChatMessage(const std::string& message) {
+        if (!isConnected) return;
         
-        std::cout << "[NET] Connecting to " << serverIP << ":" << serverPort << "...\n";
+        std::vector<uint8_t> data;
+        data.push_back((uint8_t)MessageType::CHAT_MESSAGE);
         
-        client = new HERO::HeroClient();
+        uint32_t id = localPlayerId;
+        data.push_back((id >> 24) & 0xFF);
+        data.push_back((id >> 16) & 0xFF);
+        data.push_back((id >> 8) & 0xFF);
+        data.push_back(id & 0xFF);
         
-        if (!client->Connect(serverIP, serverPort)) {
-            std::cerr << "[NET] Failed to connect to host\n";
-            delete client;
-            client = nullptr;
-            return false;
+        data.insert(data.end(), message.begin(), message.end());
+        
+        ENetPacket* packet = enet_packet_create(data.data(), data.size(), 
+                                                ENET_PACKET_FLAG_RELIABLE);
+        
+        if (isHost) {
+            enet_host_broadcast(host, 0, packet);
+        } else {
+            enet_peer_send(serverPeer, 0, packet);
         }
+        packetsSent++;
+    }
+    
+    void SendGameStart(const std::string& mapName) {
+        if (!isHost) return;
         
-        isHost = false;
-        isConnected = true;
-        hostIP = serverIP;
-        port = serverPort;
-        server = nullptr;
+        std::vector<uint8_t> data;
+        data.push_back((uint8_t)MessageType::GAME_START);
+        data.insert(data.end(), mapName.begin(), mapName.end());
         
-        std::cout << "[NET] Connected to host\n";
-        
-        // Send join request
-        auto joinData = HERO::MagicWords::Encode(MessageType::PLAYER_JOIN, playerName);
-        client->Send(joinData);
-        
-        // Wait briefly for ID assignment
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
-        // Process incoming messages to get our ID
-        HERO::Packet pkt;
-        int attempts = 0;
-        while (attempts++ < 10 && localPlayerId == 0) {
-            if (client->Receive(pkt, 100)) {
-                auto [msgType, args] = HERO::MagicWords::Decode(pkt.payload);
-                
-                if (msgType == MessageType::PLAYER_JOIN && args.size() >= 2) {
-                    localPlayerId = std::stoul(args[0]);
-                    std::string name = args[1];
-                    
-                    // Add to our client list
-                    ClientInfo info;
-                    info.playerId = localPlayerId;
-                    info.name = name;
-                    info.ipAddress = serverIP;
-                    info.port = serverPort;
-                    info.lastSeen = std::chrono::steady_clock::now();
-                    clients[localPlayerId] = info;
-                    
-                    std::cout << "[NET] Assigned Player ID: " << localPlayerId << "\n";
-                }
-            }
-        }
-        
-        if (localPlayerId == 0) {
-            std::cerr << "[NET] Failed to receive player ID from host\n";
-            Disconnect();
-            return false;
-        }
-        
-        return true;
+        ENetPacket* packet = enet_packet_create(data.data(), data.size(), 
+                                                ENET_PACKET_FLAG_RELIABLE);
+        enet_host_broadcast(host, 0, packet);
+        packetsSent++;
     }
     
     void Disconnect() {
         if (!isConnected) return;
         
-        std::cout << "[NET] Disconnecting...\n";
-        
-        // Notify others we're leaving
-        if (client && !isHost) {
-            auto data = HERO::MagicWords::Encode(MessageType::PLAYER_LEAVE, localPlayerId);
-            client->Send(data);
+        if (!isHost && serverPeer) {
+            enet_peer_disconnect(serverPeer, 0);
+            
+            ENetEvent event;
+            while (enet_host_service(host, &event, 3000) > 0) {
+                if (event.type == ENET_EVENT_TYPE_DISCONNECT) break;
+                if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+                    enet_packet_destroy(event.packet);
+                }
+            }
+            
+            enet_peer_reset(serverPeer);
+            serverPeer = nullptr;
         }
         
-        // Clean up client
-        if (client) {
-            client->Disconnect();
-            delete client;
-            client = nullptr;
-        }
-        
-        // Clean up server
-        if (server) {
-            server->Stop();
-            delete server;
-            server = nullptr;
+        if (host) {
+            enet_host_destroy(host);
+            host = nullptr;
         }
         
         isConnected = false;
-        isHost = false;
         clients.clear();
         localPlayerId = 0;
-        nextPlayerId = 1;
         
         std::cout << "[NET] Disconnected\n";
     }
     
-    // ====================================================================
-    // UPDATE LOOP
-    // ====================================================================
+    void SetMessageCallback(MessageCallback callback) { messageCallback = callback; }
+    void SetPlayerJoinCallback(PlayerJoinCallback callback) { playerJoinCallback = callback; }
+    void SetPlayerLeaveCallback(PlayerLeaveCallback callback) { playerLeaveCallback = callback; }
+    void SetMapLoadedCallback(MapLoadedCallback callback) { mapLoadedCallback = callback; }
     
-    void Update(float deltaTime) {
-        if (!isConnected) return;
-        
-        // Update ping timer
-        lastPingTime += deltaTime;
-        if (lastPingTime >= PING_INTERVAL) {
-            SendPing();
-            lastPingTime = 0.0f;
-        }
-        
-        // Process messages as host
-        if (isHost && server) {
-            server->Poll([this](const HERO::Packet& pkt, const std::string& fromIP, uint16_t fromPort) {
-                packetsReceived++;
-                HandlePacket(pkt, fromIP, fromPort);
-            });
-        }
-        
-        // Process messages as client
-        if (!isHost && client) {
-            HERO::Packet pkt;
-            while (client->Receive(pkt, 1)) {
-                packetsReceived++;
-                HandlePacket(pkt, hostIP, port);
-            }
-        }
-        
-        // Clean up stale clients (host only)
-        if (isHost) {
-            CleanupStaleClients();
-        }
-    }
-    
-    // ====================================================================
-    // MESSAGE SENDING
-    // ====================================================================
-    
-    void SendPlayerState(float x, float y, float z, float yaw, float pitch, int health, int weapon) {
-        auto data = HERO::MagicWords::Encode(MessageType::PLAYER_STATE,
-            localPlayerId, x, y, z, yaw, pitch, health, weapon);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    void SendPlayerSpawn(uint32_t playerId, float x, float y, float z) {
-        auto data = HERO::MagicWords::Encode(MessageType::PLAYER_SPAWN, playerId, x, y, z);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    void SendPlayerShoot(float originX, float originY, float originZ,
-                        float dirX, float dirY, float dirZ, int weaponType) {
-        auto data = HERO::MagicWords::Encode(MessageType::PLAYER_SHOOT,
-            localPlayerId, originX, originY, originZ, dirX, dirY, dirZ, weaponType);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    void SendPlayerHit(uint32_t victimId, int damage) {
-        auto data = HERO::MagicWords::Encode(MessageType::PLAYER_HIT,
-            localPlayerId, victimId, damage);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    void SendPlayerDeath(uint32_t killerId) {
-        auto data = HERO::MagicWords::Encode(MessageType::PLAYER_DEATH,
-            localPlayerId, killerId);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    void SendGameStart(const std::string& mapName) {
-        if (!isHost) {
-            std::cerr << "[NET] Only host can start game\n";
-            return;
-        }
-        
-        auto data = HERO::MagicWords::Encode(MessageType::GAME_START, mapName);
-        BroadcastToClients(data);
-        packetsSent++;
-    }
-    
-    void SendGameEnd(const std::string& winner) {
-        if (!isHost) return;
-        
-        auto data = HERO::MagicWords::Encode(MessageType::GAME_END, winner);
-        BroadcastToClients(data);
-        packetsSent++;
-    }
-    
-    void SendMapInfo(const std::string& mapName, const std::string& mapHash) {
-        auto data = HERO::MagicWords::Encode(MessageType::MAP_INFO, mapName, mapHash);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    void SendChatMessage(const std::string& message) {
-        auto data = HERO::MagicWords::Encode(MessageType::CHAT_MESSAGE, localPlayerId, message);
-        
-        if (isHost) {
-            BroadcastToClients(data);
-        } else {
-            SendToHost(data);
-        }
-        
-        packetsSent++;
-    }
-    
-    // ====================================================================
-    // CALLBACKS
-    // ====================================================================
-    
-    void SetMessageCallback(MessageCallback callback) {
-        messageCallback = callback;
-    }
-    
-    void SetPlayerJoinCallback(PlayerJoinCallback callback) {
-        playerJoinCallback = callback;
-    }
-    
-    void SetPlayerLeaveCallback(PlayerLeaveCallback callback) {
-        playerLeaveCallback = callback;
-    }
-    
-    // ====================================================================
-    // QUERIES
-    // ====================================================================
-    
-    bool IsHost() const { return isHost; }
     bool IsConnected() const { return isConnected; }
+    bool IsHost() const { return isHost; }
     uint32_t GetLocalPlayerId() const { return localPlayerId; }
     int GetPlayerCount() const { return clients.size(); }
     uint32_t GetPacketsSent() const { return packetsSent; }
@@ -417,271 +350,331 @@ public:
     const std::unordered_map<uint32_t, ClientInfo>& GetClients() const { return clients; }
 
 private:
-    // ====================================================================
-    // INTERNAL METHODS
-    // ====================================================================
-    
-    void HandlePacket(const HERO::Packet& pkt, const std::string& fromIP, uint16_t fromPort) {
-        auto [msgType, args] = HERO::MagicWords::Decode(pkt.payload);
+    void HandlePacket(const uint8_t* data, size_t length, ENetPeer* peer) {
+        if (length < 1) return;
         
-        // ---- PLAYER JOIN ----
-        if (msgType == MessageType::PLAYER_JOIN) {
-            if (isHost && args.size() >= 1) {
-                // HOST: New player joining
-                std::string playerName = args[0];
-                uint32_t newPlayerId = nextPlayerId++;
-                
-                ClientInfo newClient;
-                newClient.playerId = newPlayerId;
-                newClient.name = playerName;
-                newClient.ipAddress = fromIP;
-                newClient.port = fromPort;
-                newClient.isReady = false;
-                newClient.lastSeen = std::chrono::steady_clock::now();
-                clients[newPlayerId] = newClient;
-                
-                std::cout << "[NET] Player joined: " << playerName << " (ID: " << newPlayerId << ")\n";
-                
-                // Send new player their assigned ID
-                auto response = HERO::MagicWords::Encode(MessageType::PLAYER_JOIN, newPlayerId, playerName);
-                server->SendTo(response, fromIP, fromPort);
-                
-                // Send new player info about all existing players
-                for (const auto& [id, client] : clients) {
-                    if (id != newPlayerId) {
-                        auto playerInfo = HERO::MagicWords::Encode(MessageType::PLAYER_JOIN, id, client.name);
-                        server->SendTo(playerInfo, fromIP, fromPort);
-                    }
-                }
-                
-                // Notify all other clients about the new player
-                for (const auto& [id, client] : clients) {
-                    if (id != localPlayerId && id != newPlayerId) {
-                        server->SendTo(response, client.ipAddress, client.port);
-                    }
-                }
-                
-                if (playerJoinCallback) {
-                    playerJoinCallback(newPlayerId, playerName);
-                }
-            }
-            else if (!isHost && args.size() >= 2) {
-                // CLIENT: Receiving player info from host
-                uint32_t playerId = std::stoul(args[0]);
-                std::string playerName = args[1];
-                
-                // Skip if this is us (already added during connect)
-                if (playerId == localPlayerId) {
-                    return;
-                }
-                
-                // Add/update in our client list
-                ClientInfo info;
-                info.playerId = playerId;
-                info.name = playerName;
-                info.ipAddress = hostIP;
-                info.port = port;
-                info.isReady = false;
-                info.lastSeen = std::chrono::steady_clock::now();
-                clients[playerId] = info;
-                
-                std::cout << "[NET] Player in lobby: " << playerName << " (ID: " << playerId << ")\n";
-                
-                if (playerJoinCallback) {
-                    playerJoinCallback(playerId, playerName);
-                }
-            }
-        }
+        MessageType type = (MessageType)data[0];
         
-        // ---- PLAYER LEAVE ----
-        else if (msgType == MessageType::PLAYER_LEAVE && args.size() >= 1) {
-            uint32_t playerId = std::stoul(args[0]);
-            
-            auto it = clients.find(playerId);
-            if (it != clients.end()) {
-                std::string playerName = it->second.name;
-                clients.erase(it);
+        switch (type) {
+            case MessageType::PLAYER_JOIN:
+                HandlePlayerJoin(data, length, peer);
+                break;
                 
-                std::cout << "[NET] Player left: " << playerName << " (ID: " << playerId << ")\n";
+            case MessageType::PLAYER_STATE:
+                HandlePlayerState(data, length);
+                break;
                 
-                // Host broadcasts to other clients
-                if (isHost) {
-                    auto data = HERO::MagicWords::Encode(MessageType::PLAYER_LEAVE, playerId);
-                    BroadcastToClients(data);
-                }
+            case MessageType::CHAT_MESSAGE:
+                HandleChatMessage(data, length);
+                break;
                 
-                if (playerLeaveCallback) {
-                    playerLeaveCallback(playerId);
-                }
-            }
-        }
-        
-        // ---- PING REQUEST ----
-        else if (msgType == MessageType::PING_REQUEST && args.size() >= 1) {
-            uint32_t playerId = std::stoul(args[0]);
-            
-            if (isHost) {
-                // Host received ping from client - update last seen
-                auto it = clients.find(playerId);
-                if (it != clients.end()) {
-                    it->second.lastSeen = std::chrono::steady_clock::now();
-                }
-            } else {
-                // Client received ping from host - respond immediately
-                auto response = HERO::MagicWords::Encode(MessageType::PING_RESPONSE, localPlayerId);
-                SendToHost(response);
-            }
-        }
-        
-        // ---- PING RESPONSE ----
-        else if (msgType == MessageType::PING_RESPONSE && args.size() >= 1) {
-            if (isHost) {
-                uint32_t playerId = std::stoul(args[0]);
-                auto it = clients.find(playerId);
-                if (it != clients.end()) {
-                    it->second.lastSeen = std::chrono::steady_clock::now();
-                }
-            }
-        }
-        
-        // ---- PLAYER STATE ----
-        else if (msgType == MessageType::PLAYER_STATE && args.size() >= 8) {
-            uint32_t playerId = std::stoul(args[0]);
-            
-            // Update last seen for this player
-            auto it = clients.find(playerId);
-            if (it != clients.end()) {
-                it->second.lastSeen = std::chrono::steady_clock::now();
-            }
-            
-            // Host broadcasts to other clients
-            if (isHost && playerId != localPlayerId) {
-                BroadcastToOthers(pkt.payload, playerId);
-            }
-            
-            if (messageCallback) {
-                messageCallback(msgType, args, fromIP, fromPort);
-            }
-        }
-        
-        // ---- PLAYER SHOOT ----
-        else if (msgType == MessageType::PLAYER_SHOOT && args.size() >= 8) {
-            // Host validates and broadcasts to all clients
-            if (isHost) {
-                uint32_t shooterId = std::stoul(args[0]);
-                BroadcastToOthers(pkt.payload, shooterId);
-            }
-            
-            if (messageCallback) {
-                messageCallback(msgType, args, fromIP, fromPort);
-            }
-        }
-        
-        // ---- CHAT MESSAGE ----
-        else if (msgType == MessageType::CHAT_MESSAGE && args.size() >= 2) {
-            uint32_t senderId = std::stoul(args[0]);
-            std::string message = args[1];
-            
-            // Find sender name
-            std::string senderName = "Unknown";
-            auto it = clients.find(senderId);
-            if (it != clients.end()) {
-                senderName = it->second.name;
-            }
-            
-            std::cout << "[CHAT] " << senderName << ": " << message << "\n";
-            
-            // Host broadcasts to all other clients
-            if (isHost && senderId != localPlayerId) {
-                BroadcastToOthers(pkt.payload, senderId);
-            }
-            
-            if (messageCallback) {
-                messageCallback(msgType, args, fromIP, fromPort);
-            }
-        }
-        
-        // ---- OTHER MESSAGES ----
-        else if (messageCallback) {
-            messageCallback(msgType, args, fromIP, fromPort);
+            case MessageType::MAP_REQUEST:
+                HandleMapRequest(peer);
+                break;
+                
+            case MessageType::MAP_CHUNK:
+                HandleMapChunk(data, length);
+                break;
+                
+            case MessageType::MAP_COMPLETE:
+                HandleMapComplete(peer);
+                break;
+                
+            case MessageType::GAME_START:
+                HandleGameStart(data, length);
+                break;
+                
+            default:
+                break;
         }
     }
     
-    void SendPing() {
+    void HandlePlayerJoin(const uint8_t* data, size_t length, ENetPeer* peer) {
         if (isHost) {
-            // Host sends ping to all clients
+            // Host receives join request
+            std::string name((char*)data + 1, length - 1);
+            uint32_t newId = nextPlayerId++;
+            
+            ClientInfo info;
+            info.playerId = newId;
+            info.name = name;
+            info.peer = peer;
+            info.hasMap = false;
+            info.isReady = false;
+            clients[newId] = info;
+            
+            peer->data = (void*)(uintptr_t)newId;
+            
+            std::cout << "[NET] Player joined: " << name << " (ID: " << newId << ")\n";
+            
+            // Send player ID
+            std::vector<uint8_t> response;
+            response.push_back((uint8_t)MessageType::PLAYER_JOIN);
+            response.push_back((newId >> 24) & 0xFF);
+            response.push_back((newId >> 16) & 0xFF);
+            response.push_back((newId >> 8) & 0xFF);
+            response.push_back(newId & 0xFF);
+            response.insert(response.end(), name.begin(), name.end());
+            
+            ENetPacket* packet = enet_packet_create(response.data(), response.size(),
+                                                   ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(peer, 0, packet);
+            
+            // Send info about all other players to new player
             for (const auto& [id, client] : clients) {
-                if (id != localPlayerId) {
-                    auto data = HERO::MagicWords::Encode(MessageType::PING_REQUEST, id);
-                    server->SendTo(data, client.ipAddress, client.port);
+                if (id != newId && id != localPlayerId) {
+                    std::vector<uint8_t> info;
+                    info.push_back((uint8_t)MessageType::PLAYER_JOIN);
+                    info.push_back((id >> 24) & 0xFF);
+                    info.push_back((id >> 16) & 0xFF);
+                    info.push_back((id >> 8) & 0xFF);
+                    info.push_back(id & 0xFF);
+                    info.insert(info.end(), client.name.begin(), client.name.end());
+                    
+                    ENetPacket* p = enet_packet_create(info.data(), info.size(),
+                                                       ENET_PACKET_FLAG_RELIABLE);
+                    enet_peer_send(peer, 0, p);
                 }
+            }
+            
+            // Notify other clients
+            for (const auto& [id, client] : clients) {
+                if (id != newId && id != localPlayerId && client.peer) {
+                    ENetPacket* p = enet_packet_create(response.data(), response.size(),
+                                                       ENET_PACKET_FLAG_RELIABLE);
+                    enet_peer_send(client.peer, 0, p);
+                }
+            }
+            
+            enet_host_flush(host);
+            
+            if (playerJoinCallback) {
+                playerJoinCallback(newId, name);
             }
         } else {
-            // Client sends ping to host
-            auto data = HERO::MagicWords::Encode(MessageType::PING_REQUEST, localPlayerId);
-            SendToHost(data);
-        }
-    }
-    
-    void CleanupStaleClients() {
-        if (!isHost) return;
-        
-        auto now = std::chrono::steady_clock::now();
-        std::vector<uint32_t> toRemove;
-        
-        for (const auto& [id, client] : clients) {
-            if (id == localPlayerId) continue; // Don't check ourselves
-            
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastSeen).count();
-            if (elapsed > TIMEOUT_DURATION) {
-                std::cout << "[NET] Client timeout: " << id << "\n";
-                toRemove.push_back(id);
-            }
-        }
-        
-        for (uint32_t id : toRemove) {
-            auto it = clients.find(id);
-            if (it != clients.end()) {
-                std::string playerName = it->second.name;
-                clients.erase(it);
+            // Client receives player info
+            if (length >= 5) {
+                uint32_t playerId = (data[1] << 24) | (data[2] << 16) | 
+                                   (data[3] << 8) | data[4];
+                std::string name((char*)data + 5, length - 5);
                 
-                std::cout << "[NET] Player left: " << playerName << " (ID: " << id << ")\n";
-                
-                // Notify other clients
-                auto data = HERO::MagicWords::Encode(MessageType::PLAYER_LEAVE, id);
-                BroadcastToClients(data);
-                
-                if (playerLeaveCallback) {
-                    playerLeaveCallback(id);
+                if (localPlayerId == 0) {
+                    localPlayerId = playerId;
+                    std::cout << "[NET] Assigned player ID: " << localPlayerId << "\n";
+                    
+                    ClientInfo info;
+                    info.playerId = localPlayerId;
+                    info.name = name;
+                    info.peer = serverPeer;
+                    info.hasMap = false;
+                    info.isReady = false;
+                    clients[localPlayerId] = info;
+                } else {
+                    ClientInfo info;
+                    info.playerId = playerId;
+                    info.name = name;
+                    info.peer = serverPeer;
+                    info.hasMap = false;
+                    info.isReady = false;
+                    clients[playerId] = info;
+                    
+                    std::cout << "[NET] Player in lobby: " << name << " (ID: " << playerId << ")\n";
+                    
+                    if (playerJoinCallback) {
+                        playerJoinCallback(playerId, name);
+                    }
                 }
             }
         }
     }
     
-    void SendToHost(const std::vector<uint8_t>& data) {
-        if (client && !isHost) {
-            client->Send(data);
+    void HandlePlayerState(const uint8_t* data, size_t length) {
+        if (length < sizeof(uint8_t) + sizeof(uint32_t) + 5 * sizeof(float) + 2 * sizeof(int32_t)) return;
+        
+        const uint8_t* ptr = data + 1;
+        uint32_t playerId = *(uint32_t*)ptr; ptr += sizeof(uint32_t);
+        float x = *(float*)ptr; ptr += sizeof(float);
+        float y = *(float*)ptr; ptr += sizeof(float);
+        float z = *(float*)ptr; ptr += sizeof(float);
+        float yaw = *(float*)ptr; ptr += sizeof(float);
+        float pitch = *(float*)ptr; ptr += sizeof(float);
+        int32_t health = *(int32_t*)ptr; ptr += sizeof(int32_t);
+        int32_t weapon = *(int32_t*)ptr;
+        
+        if (messageCallback) {
+            std::vector<std::string> args;
+            args.push_back(std::to_string(playerId));
+            args.push_back(std::to_string(x));
+            args.push_back(std::to_string(y));
+            args.push_back(std::to_string(z));
+            args.push_back(std::to_string(yaw));
+            args.push_back(std::to_string(pitch));
+            args.push_back(std::to_string(health));
+            args.push_back(std::to_string(weapon));
+            messageCallback("PLAYER_STATE", args);
         }
     }
     
-    void BroadcastToClients(const std::vector<uint8_t>& data) {
-        if (!isHost || !server) return;
+    void HandleChatMessage(const uint8_t* data, size_t length) {
+        if (length < 6) return;
         
-        for (const auto& [id, client] : clients) {
-            if (id != localPlayerId) {
-                server->SendTo(data, client.ipAddress, client.port);
-            }
+        uint32_t senderId = (data[1] << 24) | (data[2] << 16) | (data[3] << 8) | data[4];
+        std::string message((char*)data + 5, length - 5);
+        
+        std::string senderName = "Unknown";
+        auto it = clients.find(senderId);
+        if (it != clients.end()) {
+            senderName = it->second.name;
+        }
+        
+        std::cout << "[CHAT] " << senderName << ": " << message << "\n";
+        
+        if (messageCallback) {
+            std::vector<std::string> args;
+            args.push_back(std::to_string(senderId));
+            args.push_back(message);
+            messageCallback("CHAT_MESSAGE", args);
         }
     }
     
-    void BroadcastToOthers(const std::vector<uint8_t>& data, uint32_t excludeId) {
-        if (!isHost || !server) return;
+    void HandleMapRequest(ENetPeer* peer) {
+        if (!isHost || currentMapPath.empty()) return;
         
-        for (const auto& [id, client] : clients) {
-            if (id != localPlayerId && id != excludeId) {
-                server->SendTo(data, client.ipAddress, client.port);
-            }
+        std::cout << "[NET] Sending map to client...\n";
+        
+        std::ifstream f(currentMapPath, std::ios::binary | std::ios::ate);
+        if (!f.is_open()) {
+            std::cerr << "[NET] Cannot open map file\n";
+            return;
         }
+        
+        size_t fileSize = f.tellg();
+        f.seekg(0);
+        
+        std::vector<uint8_t> fileData(fileSize);
+        f.read((char*)fileData.data(), fileSize);
+        f.close();
+        
+        // Send in 8KB chunks
+        const size_t chunkSize = 8192;
+        size_t totalChunks = (fileSize + chunkSize - 1) / chunkSize;
+        
+        for (size_t i = 0; i < totalChunks; i++) {
+            size_t offset = i * chunkSize;
+            size_t size = std::min(chunkSize, fileSize - offset);
+            
+            std::vector<uint8_t> chunkData;
+            chunkData.push_back((uint8_t)MessageType::MAP_CHUNK);
+            chunkData.push_back((i >> 8) & 0xFF);
+            chunkData.push_back(i & 0xFF);
+            chunkData.push_back((totalChunks >> 8) & 0xFF);
+            chunkData.push_back(totalChunks & 0xFF);
+            chunkData.push_back((fileSize >> 24) & 0xFF);
+            chunkData.push_back((fileSize >> 16) & 0xFF);
+            chunkData.push_back((fileSize >> 8) & 0xFF);
+            chunkData.push_back(fileSize & 0xFF);
+            chunkData.insert(chunkData.end(), &fileData[offset], &fileData[offset + size]);
+            
+            ENetPacket* packet = enet_packet_create(chunkData.data(), chunkData.size(),
+                                                    ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(peer, 0, packet);
+        }
+        
+        enet_host_flush(host);
+        std::cout << "[NET] Map sent (" << totalChunks << " chunks)\n";
+    }
+    
+    void HandleMapChunk(const uint8_t* data, size_t length) {
+        if (length < 9) return;
+        
+        size_t chunkIdx = (data[1] << 8) | data[2];
+        size_t totalChunks = (data[3] << 8) | data[4];
+        size_t fileSize = (data[5] << 24) | (data[6] << 16) | (data[7] << 8) | data[8];
+        
+        if (chunkIdx == 0) {
+            receivedMapData.clear();
+            receivedMapData.reserve(fileSize);
+            expectedMapSize = fileSize;
+            chunksReceived = 0;
+            std::cout << "[NET] Receiving map: " << fileSize << " bytes in " << totalChunks << " chunks\n";
+        }
+        
+        receivedMapData.insert(receivedMapData.end(), data + 9, data + length);
+        chunksReceived++;
+        
+        float progress = (float)chunksReceived / totalChunks * 100.0f;
+        std::cout << "[NET] Progress: " << (int)progress << "%\r" << std::flush;
+        
+        if (chunksReceived >= totalChunks) {
+            std::cout << "\n[NET] Map transfer complete!\n";
+            
+            std::string tempPath = "/tmp/received_map.pcd";
+            std::ofstream f(tempPath, std::ios::binary);
+            f.write((char*)receivedMapData.data(), receivedMapData.size());
+            f.close();
+            
+            if (PCD::PCDReader::Load(currentMap, tempPath)) {
+                std::cout << "[NET] Map loaded successfully\n";
+                clients[localPlayerId].hasMap = true;
+                
+                // Send acknowledgment
+                std::vector<uint8_t> ack;
+                ack.push_back((uint8_t)MessageType::MAP_COMPLETE);
+                
+                ENetPacket* packet = enet_packet_create(ack.data(), ack.size(),
+                                                       ENET_PACKET_FLAG_RELIABLE);
+                enet_peer_send(serverPeer, 0, packet);
+                enet_host_flush(host);
+                
+                if (mapLoadedCallback) {
+                    mapLoadedCallback(currentMap);
+                }
+            } else {
+                std::cerr << "[NET] Failed to load received map\n";
+            }
+            
+            receivedMapData.clear();
+        }
+    }
+    
+    void HandleMapComplete(ENetPeer* peer) {
+        if (!peer->data) return;
+        
+        uint32_t playerId = (uint32_t)(uintptr_t)peer->data;
+        auto it = clients.find(playerId);
+        if (it != clients.end()) {
+            it->second.hasMap = true;
+            std::cout << "[NET] Client " << playerId << " has map\n";
+        }
+    }
+    
+    void HandleGameStart(const uint8_t* data, size_t length) {
+        std::string mapName((char*)data + 1, length - 1);
+        std::cout << "[NET] GAME STARTING - Map: " << mapName << "\n";
+        
+        if (messageCallback) {
+            std::vector<std::string> args;
+            args.push_back(mapName);
+            messageCallback("GAME_START", args);
+        }
+    }
+    
+    void HandleDisconnect(ENetPeer* peer) {
+        if (!peer->data) return;
+        
+        uint32_t playerId = (uint32_t)(uintptr_t)peer->data;
+        auto it = clients.find(playerId);
+        if (it != clients.end()) {
+            std::cout << "[NET] Player left: " << it->second.name << "\n";
+            
+            if (playerLeaveCallback) {
+                playerLeaveCallback(playerId);
+            }
+            
+            clients.erase(it);
+        }
+        
+        peer->data = nullptr;
     }
 };
 

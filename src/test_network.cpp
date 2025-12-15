@@ -1,4 +1,4 @@
-// test_network.cpp - Clean test program for NetworkManager
+// test_network.cpp - Fixed to work with updated NetworkManager
 
 #include "Network/NetworkManager.h"
 #include <iostream>
@@ -11,7 +11,6 @@ void PrintHelp() {
     std::cout << "\nCommands:\n";
     std::cout << "  help          - Show this help\n";
     std::cout << "  state         - Send player state (test)\n";
-    std::cout << "  shoot         - Send shoot event (test)\n";
     std::cout << "  chat <msg>    - Send chat message\n";
     std::cout << "  start <map>   - Start game (host only)\n";
     std::cout << "  list          - List connected players\n";
@@ -20,7 +19,7 @@ void PrintHelp() {
 }
 
 void RunHost(uint16_t port) {
-    Network::NetworkManager net;
+    Network::ENetNetworkManager net;
     
     std::cout << "\n=== HOST MODE ===\n";
     if (!net.HostGame(port, "Host")) {
@@ -38,7 +37,6 @@ void RunHost(uint16_t port) {
     });
     
     net.SetPlayerLeaveCallback([&net](uint32_t playerId) {
-        // Find player name
         std::string name = "Player " + std::to_string(playerId);
         const auto& clients = net.GetClients();
         auto it = clients.find(playerId);
@@ -59,18 +57,9 @@ void RunHost(uint16_t port) {
             return;
         }
         
-        if (msgType == Network::MessageType::PLAYER_SHOOT && args.size() >= 8) {
-            uint32_t shooterId = std::stoul(args[0]);
-            int weaponType = std::stoi(args[7]);
-            
-            std::string playerName = "Player " + std::to_string(shooterId);
-            const auto& clients = net.GetClients();
-            auto it = clients.find(shooterId);
-            if (it != clients.end()) {
-                playerName = it->second.name;
-            }
-            
-            std::cout << "\n>>> " << playerName << " fired weapon " << weaponType << "\n> ";
+        // Display other messages
+        if (!msgType.empty() && msgType != Network::MessageType::CHAT_MESSAGE) {
+            std::cout << "\n>>> Received message: " << msgType << "\n> ";
             std::cout.flush();
         }
     });
@@ -106,15 +95,9 @@ void RunHost(uint16_t port) {
             net.SendPlayerState(1.0f, 2.0f, 3.0f, 0.5f, 0.3f, 100, 1);
             std::cout << "Sent player state\n";
         }
-        else if (command == "shoot") {
-            net.SendPlayerShoot(1.0f, 2.0f, 3.0f, 0.0f, 0.0f, 1.0f, 0);
-            std::cout << "Sent shoot event\n";
-        }
         else if (command == "chat") {
-            // Get rest of line as message
             std::string msg;
             std::getline(iss, msg);
-            // Trim leading space
             if (!msg.empty() && msg[0] == ' ') {
                 msg = msg.substr(1);
             }
@@ -140,6 +123,11 @@ void RunHost(uint16_t port) {
                 std::cout << "  [" << id << "] " << client.name;
                 if (id == net.GetLocalPlayerId()) {
                     std::cout << " (you)";
+                }
+                if (client.hasMap) {
+                    std::cout << " [Has Map]";
+                } else {
+                    std::cout << " [No Map]";
                 }
                 std::cout << "\n";
             }
@@ -204,24 +192,20 @@ void RunClient(const std::string& hostIP, uint16_t port) {
             return;
         }
         
-        if (msgType == Network::MessageType::PLAYER_SHOOT && args.size() >= 8) {
-            uint32_t shooterId = std::stoul(args[0]);
-            int weaponType = std::stoi(args[7]);
-            
-            std::string playerName = "Player " + std::to_string(shooterId);
-            const auto& clients = net.GetClients();
-            auto it = clients.find(shooterId);
-            if (it != clients.end()) {
-                playerName = it->second.name;
-            }
-            
-            std::cout << "\n>>> " << playerName << " fired weapon " << weaponType << "\n> ";
-            std::cout.flush();
-        }
-        else if (msgType == Network::MessageType::GAME_START && !args.empty()) {
+        if (msgType == Network::MessageType::GAME_START && !args.empty()) {
             std::cout << "\n>>> GAME STARTING - Map: " << args[0] << "\n> ";
             std::cout.flush();
         }
+        else if (!msgType.empty() && msgType != Network::MessageType::CHAT_MESSAGE) {
+            std::cout << "\n>>> Received message: " << msgType << "\n> ";
+            std::cout.flush();
+        }
+    });
+    
+    net.SetMapLoadedCallback([](const PCD::Map& map) {
+        std::cout << "\n>>> Map loaded! Brushes: " << map.brushes.size() 
+                  << ", Entities: " << map.entities.size() << "\n> ";
+        std::cout.flush();
     });
     
     // Main loop
@@ -255,10 +239,6 @@ void RunClient(const std::string& hostIP, uint16_t port) {
             net.SendPlayerState(5.0f, 1.0f, 7.0f, 1.2f, 0.1f, 80, 2);
             std::cout << "Sent player state\n";
         }
-        else if (command == "shoot") {
-            net.SendPlayerShoot(5.0f, 1.0f, 7.0f, 1.0f, 0.0f, 0.0f, 1);
-            std::cout << "Sent shoot event\n";
-        }
         else if (command == "chat") {
             std::string msg;
             std::getline(iss, msg);
@@ -272,6 +252,10 @@ void RunClient(const std::string& hostIP, uint16_t port) {
                 std::cout << "Usage: chat <message>\n";
             }
         }
+        else if (command == "map") {
+            std::cout << "Requesting map from host...\n";
+            net.RequestMap();
+        }
         else if (command == "start") {
             std::cout << "Only host can start the game\n";
         }
@@ -281,6 +265,11 @@ void RunClient(const std::string& hostIP, uint16_t port) {
                 std::cout << "  [" << id << "] " << client.name;
                 if (id == net.GetLocalPlayerId()) {
                     std::cout << " (you)";
+                }
+                if (client.hasMap) {
+                    std::cout << " [Has Map]";
+                } else {
+                    std::cout << " [No Map]";
                 }
                 std::cout << "\n";
             }
