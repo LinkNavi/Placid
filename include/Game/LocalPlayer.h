@@ -1,7 +1,13 @@
 // LocalPlayer.h - Fixed with proper includes
 
 #pragma once
+// LocalPlayer.h - Fixed with proper includes
 
+#pragma once
+
+#ifndef GLAD_GL_IMPLEMENTATION
+#include <glad/gl.h>
+#endif
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include "PCD/PCDTypes.h"

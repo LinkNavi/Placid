@@ -1,5 +1,6 @@
 // LocalPlayer.cpp - Implementation
 
+#include <glad/gl.h>  // MUST be fir
 #include "Game/LocalPlayer.h"
 #include "Network/NetworkManager.h"
 #include <cmath>

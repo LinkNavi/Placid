@@ -10,7 +10,7 @@
 #include <cstring>
 
 // stb_image for PNG/JPG loading
-#define STB_IMAGE_IMPLEMENTATION
+
 #include "stb/stb_image.h"
 
 namespace TextureLoader {

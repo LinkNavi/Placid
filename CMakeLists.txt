@@ -44,6 +44,8 @@ include_directories(
 # Common source files
 set(COMMON_SOURCES
     src/EditorApp.cpp
+    
+    src/TextureLoader.cpp
     src/GameMode.cpp
     src/Renderer.cpp
     src/LocalPlayer.cpp
@@ -69,6 +71,8 @@ target_link_libraries(placid
 # Standalone map editor
 add_executable(editor
     src/Editor.cpp
+
+    src/TextureLoader.cpp
     src/EditorApp.cpp
     src/GameMode.cpp
     src/Renderer.cpp

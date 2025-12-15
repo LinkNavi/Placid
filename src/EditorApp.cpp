@@ -162,16 +162,16 @@ void EditorApp::ProcessInput(float dt) {
         right.y = 0;
         right = right.normalized();
         
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint + forward * speed * dt;
         }
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint - forward * speed * dt;
         }
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint - right * speed * dt;
         }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint + right * speed * dt;
         }
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
@@ -543,8 +543,12 @@ void EditorApp::MouseCallback(GLFWwindow* window, double xpos, double ypos) {
             forward.y = 0;
             forward = forward.normalized();
             
-            float worldDX = (dx * right.x - dy * forward.x) * moveScale;
-            float worldDZ = (dx * right.z - dy * forward.z) * moveScale;
+float invDX = -dx;
+float invDY = -dy;
+         
+float worldDX = (invDX * right.x - invDY * forward.x) * moveScale;
+float worldDZ = (invDX * right.z - invDY * forward.z) * moveScale;
+
             
             app->dragAccumX += worldDX;
             app->dragAccumZ += worldDZ;
