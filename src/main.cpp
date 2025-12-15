@@ -1,8 +1,7 @@
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include "Engine/Camera.h"
-#include "Engine/PCDFormat.h"
-#include "Engine/MapEditor.h"
+#include "Engine/PCD.h"
 #include "Game/KeybindManager.h"
 #include "imgui.h"
 #include <iostream>
@@ -582,6 +581,52 @@ void renderCreationPreview(GLuint vao, GLuint vbo, GLuint ebo, GLuint program, f
 }
 
 int main(int argc, char* argv[]) {
+
+bool editorOnly = false;
+
+for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--editor") {
+        editorOnly = true;
+    }
+}
+
+
+if (editorOnly) {
+    // Minimal editor-only boot
+    if (!glfwInit()) return -1;
+
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "Placid Editor", nullptr, nullptr);
+    if (!window) return -1;
+
+    glfwMakeContextCurrent(window);
+
+    if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
+        std::cerr << "GLAD failed\n";
+        return -1;
+    }
+
+    glEnable(GL_DEPTH_TEST);
+
+    // PCD editor setup
+    PCD::EditorState editorState;
+    PCD::EditorUI editorUI(editorState);
+
+    while (!glfwWindowShouldClose(window)) {
+        glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        editorUI.Render();
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 0;
+}
+
+
     if (!glfwInit()) return -1;
     
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
