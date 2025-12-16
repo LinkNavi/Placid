@@ -406,7 +406,8 @@ void Renderer::RenderGizmo(const PCD::Vec3& position, PCD::EditorTool tool, int 
 }
 
 void Renderer::RenderArrow(const PCD::Vec3& pos, const PCD::Vec3& dir, float r, float g, float b, bool highlight, float* view, float* proj) {
-    float length = 3.0f;
+   float length = 4.0f; // Match increased gizmo size
+    float lineWidth = highlight ? 5.0f : 3.0f; // Thicker when highlighted
     
     if (highlight) {
         r = 1.0f; g = 1.0f; b = 0.3f;
@@ -474,7 +475,7 @@ void Renderer::RenderArrow(const PCD::Vec3& pos, const PCD::Vec3& dir, float r, 
     glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, model);
     glUniform1i(glGetUniformLocation(shaderProgram, "hasTexture"), 0);
     
-    glLineWidth(highlight ? 4.0f : 2.0f);
+    glLineWidth(lineWidth);
     glDrawArrays(GL_LINE_STRIP, 0, 11);
     glDrawArrays(GL_LINES, 11, verts.size()/8 - 11);
     glLineWidth(1.0f);

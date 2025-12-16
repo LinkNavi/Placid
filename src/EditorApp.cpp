@@ -1,4 +1,4 @@
-// Enhanced EditorApp.cpp with fixed gizmo dragging and many new features
+// EditorApp.cpp - FIXED: Arrow key controls for object manipulation
 
 #include "Engine/EditorApp.h"
 #include "Engine/GameMode.h"
@@ -155,6 +155,215 @@ void EditorApp::ProcessInput(float dt) {
                    (glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS);
 
     ImGuiIO &io = ImGui::GetIO();
+    
+    // Arrow key object manipulation
+    if (!io.WantCaptureKeyboard && (mapEditor->GetSelectedBrushIndex() >= 0 || 
+                                     mapEditor->GetSelectedEntityIndex() >= 0)) {
+        
+        float moveSpeed = shiftPressed ? 1.0f : 0.1f; // Shift = faster movement
+        float scaleSpeed = shiftPressed ? 0.1f : 0.01f; // Shift = faster scaling
+        
+        PCD::EditorTool currentTool = mapEditor->GetSettings().currentTool;
+        
+        // MOVE tool - Arrow keys for XZ, Q/E for Y
+        if (currentTool == PCD::EditorTool::MOVE) {
+            PCD::Vec3 delta(0, 0, 0);
+            
+            if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+                delta.z -= moveSpeed * dt * 10.0f;
+            }
+            if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+                delta.z += moveSpeed * dt * 10.0f;
+            }
+            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+                delta.x -= moveSpeed * dt * 10.0f;
+            }
+            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+                delta.x += moveSpeed * dt * 10.0f;
+            }
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+                delta.y -= moveSpeed * dt * 10.0f;
+            }
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
+                delta.y += moveSpeed * dt * 10.0f;
+            }
+            
+            if (delta.x != 0 || delta.y != 0 || delta.z != 0) {
+                // Apply grid snapping if enabled
+                if (mapEditor->GetSettings().snapToGrid) {
+                    float gridSize = mapEditor->GetSettings().gridSize;
+                    delta.x = std::round(delta.x / gridSize) * gridSize;
+                    delta.y = std::round(delta.y / gridSize) * gridSize;
+                    delta.z = std::round(delta.z / gridSize) * gridSize;
+                }
+                
+                // Move selected object
+                if (mapEditor->GetSelectedBrushIndex() >= 0) {
+                    auto& brush = mapEditor->GetMap().brushes[mapEditor->GetSelectedBrushIndex()];
+                    for (auto& v : brush.vertices) {
+                        v.position = v.position + delta;
+                    }
+                    mapEditor->GetMap().hasUnsavedChanges = true;
+                }
+                if (mapEditor->GetSelectedEntityIndex() >= 0) {
+                    auto& ent = mapEditor->GetMap().entities[mapEditor->GetSelectedEntityIndex()];
+                    ent.position = ent.position + delta;
+                    mapEditor->GetMap().hasUnsavedChanges = true;
+                }
+            }
+        }
+        
+        // SCALE tool - Arrow keys for XZ scale, Q/E for Y scale
+        else if (currentTool == PCD::EditorTool::SCALE) {
+            PCD::Vec3 scaleDelta(1.0f, 1.0f, 1.0f);
+            bool scaleChanged = false;
+            
+            if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+                scaleDelta.z += scaleSpeed * dt * 10.0f;
+                scaleChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+                scaleDelta.z -= scaleSpeed * dt * 10.0f;
+                scaleChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+                scaleDelta.x -= scaleSpeed * dt * 10.0f;
+                scaleChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+                scaleDelta.x += scaleSpeed * dt * 10.0f;
+                scaleChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+                scaleDelta.y -= scaleSpeed * dt * 10.0f;
+                scaleChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
+                scaleDelta.y += scaleSpeed * dt * 10.0f;
+                scaleChanged = true;
+            }
+            
+            if (scaleChanged) {
+                // Scale entity
+                if (mapEditor->GetSelectedEntityIndex() >= 0) {
+                    auto& ent = mapEditor->GetMap().entities[mapEditor->GetSelectedEntityIndex()];
+                    ent.scale.x = std::max(0.1f, ent.scale.x * scaleDelta.x);
+                    ent.scale.y = std::max(0.1f, ent.scale.y * scaleDelta.y);
+                    ent.scale.z = std::max(0.1f, ent.scale.z * scaleDelta.z);
+                    mapEditor->GetMap().hasUnsavedChanges = true;
+                }
+                
+                // Scale brush from center
+                if (mapEditor->GetSelectedBrushIndex() >= 0) {
+                    auto& brush = mapEditor->GetMap().brushes[mapEditor->GetSelectedBrushIndex()];
+                    
+                    // Calculate brush center
+                    PCD::Vec3 center(0, 0, 0);
+                    for (auto& v : brush.vertices) {
+                        center.x += v.position.x;
+                        center.y += v.position.y;
+                        center.z += v.position.z;
+                    }
+                    center.x /= brush.vertices.size();
+                    center.y /= brush.vertices.size();
+                    center.z /= brush.vertices.size();
+                    
+                    // Scale from center
+                    for (auto& v : brush.vertices) {
+                        PCD::Vec3 offset = v.position - center;
+                        offset.x *= scaleDelta.x;
+                        offset.y *= scaleDelta.y;
+                        offset.z *= scaleDelta.z;
+                        v.position = center + offset;
+                    }
+                    mapEditor->GetMap().hasUnsavedChanges = true;
+                }
+            }
+        }
+        
+        // ROTATE tool - Arrow keys for Y rotation, Q/E for Z rotation
+        else if (currentTool == PCD::EditorTool::ROTATE) {
+            float rotSpeed = shiftPressed ? 2.0f : 0.5f; // degrees per frame
+            bool rotChanged = false;
+            PCD::Vec3 rotation(0, 0, 0);
+            
+            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+                rotation.y += rotSpeed * dt * 60.0f;
+                rotChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+                rotation.y -= rotSpeed * dt * 60.0f;
+                rotChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+                rotation.z += rotSpeed * dt * 60.0f;
+                rotChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
+                rotation.z -= rotSpeed * dt * 60.0f;
+                rotChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+                rotation.x += rotSpeed * dt * 60.0f;
+                rotChanged = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+                rotation.x -= rotSpeed * dt * 60.0f;
+                rotChanged = true;
+            }
+            
+            if (rotChanged) {
+                // Rotate entity
+                if (mapEditor->GetSelectedEntityIndex() >= 0) {
+                    auto& ent = mapEditor->GetMap().entities[mapEditor->GetSelectedEntityIndex()];
+                    ent.rotation.x += rotation.x;
+                    ent.rotation.y += rotation.y;
+                    ent.rotation.z += rotation.z;
+                    mapEditor->GetMap().hasUnsavedChanges = true;
+                }
+                
+                // Rotate brush around center
+                if (mapEditor->GetSelectedBrushIndex() >= 0) {
+                    auto& brush = mapEditor->GetMap().brushes[mapEditor->GetSelectedBrushIndex()];
+                    
+                    // Calculate center
+                    PCD::Vec3 center(0, 0, 0);
+                    for (auto& v : brush.vertices) {
+                        center.x += v.position.x;
+                        center.y += v.position.y;
+                        center.z += v.position.z;
+                    }
+                    center.x /= brush.vertices.size();
+                    center.y /= brush.vertices.size();
+                    center.z /= brush.vertices.size();
+                    
+                    // Rotate around Y axis (most common)
+                    if (rotation.y != 0) {
+                        float angle = rotation.y * 3.14159f / 180.0f;
+                        float cosA = std::cos(angle);
+                        float sinA = std::sin(angle);
+                        
+                        for (auto& v : brush.vertices) {
+                            float relX = v.position.x - center.x;
+                            float relZ = v.position.z - center.z;
+                            
+                            v.position.x = center.x + relX * cosA - relZ * sinA;
+                            v.position.z = center.z + relX * sinA + relZ * cosA;
+                            
+                            float nrelX = v.normal.x;
+                            float nrelZ = v.normal.z;
+                            v.normal.x = nrelX * cosA - nrelZ * sinA;
+                            v.normal.z = nrelX * sinA + nrelZ * cosA;
+                        }
+                    }
+                    
+                    mapEditor->GetMap().hasUnsavedChanges = true;
+                }
+            }
+        }
+    }
+    
+    // Camera controls (WASD when no object selected or when Alt is held)
     if (!io.WantCaptureMouse && !io.WantCaptureKeyboard && cameraMode == CameraMode::FREE) {
         float speed = cameraMoveSpeed * (shiftPressed ? 2.5f : 1.0f);
 
@@ -166,23 +375,17 @@ void EditorApp::ProcessInput(float dt) {
         right.y = 0;
         right = right.normalized();
 
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint + forward * speed * dt;
         }
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint - forward * speed * dt;
         }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint - right * speed * dt;
         }
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
             cameraFocusPoint = cameraFocusPoint + right * speed * dt;
-        }
-        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-            cameraFocusPoint.y -= speed * dt;
-        }
-        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
-            cameraFocusPoint.y += speed * dt;
         }
     }
 }
@@ -320,19 +523,12 @@ void EditorApp::Render() {
         renderer->RenderCreationPreview(mapEditor->GetCreateStart(), mapEditor->GetCreateEnd(),
                                         mapEditor->GetSettings().gridSize, view, proj);
     }
-    
-    // Render measurement line if active
-    if (mapEditor->HasMeasurement()) {
-        // TODO: Add measurement line rendering
-    }
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
     mapEditor->RenderUI();
-    
-    // Additional UI panels
     RenderStatsPanel();
     RenderToolsPanel();
 
@@ -370,12 +566,22 @@ void EditorApp::RenderToolsPanel() {
     ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);
     
     if (ImGui::Begin("Advanced Tools")) {
-        if (ImGui::CollapsingHeader("Brush Operations", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::CollapsingHeader("Keyboard Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Arrow Keys:");
+            ImGui::Text("  Up/Down - Z axis");
+            ImGui::Text("  Left/Right - X axis");
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Q/E Keys:");
+            ImGui::Text("  Q - Down (Y-)");
+            ImGui::Text("  E - Up (Y+)");
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Hold Shift:");
+            ImGui::Text("  10x faster");
+        }
+        
+        if (ImGui::CollapsingHeader("Brush Operations")) {
             if (ImGui::Button("Hollow Brush", ImVec2(190, 0))) {
                 mapEditor->HollowBrush(0.25f);
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Creates hollow walls from selected brush");
             }
             
             ImGui::Separator();
@@ -407,78 +613,6 @@ void EditorApp::RenderToolsPanel() {
             if (ImGui::Button("Align Y", ImVec2(60, 0))) mapEditor->AlignSelectedToY();
             ImGui::SameLine();
             if (ImGui::Button("Align Z", ImVec2(60, 0))) mapEditor->AlignSelectedToZ();
-        }
-        
-        if (ImGui::CollapsingHeader("Snap Settings")) {
-            bool snapRot = mapEditor->IsSnapRotation();
-            if (ImGui::Checkbox("Snap Rotation", &snapRot)) {
-                mapEditor->SetSnapRotation(snapRot);
-            }
-            
-            float rotSnap = mapEditor->GetRotationSnap();
-            if (ImGui::SliderFloat("Angle##rot", &rotSnap, 5.0f, 90.0f, "%.0f deg")) {
-                mapEditor->SetRotationSnap(rotSnap);
-            }
-            
-            bool snapScl = mapEditor->IsSnapScale();
-            if (ImGui::Checkbox("Snap Scale", &snapScl)) {
-                mapEditor->SetSnapScale(snapScl);
-            }
-            
-            float sclSnap = mapEditor->GetScaleSnap();
-            if (ImGui::SliderFloat("Increment##scl", &sclSnap, 0.1f, 1.0f, "%.2f")) {
-                mapEditor->SetScaleSnap(sclSnap);
-            }
-        }
-        
-        if (ImGui::CollapsingHeader("Measurement")) {
-            if (mapEditor->HasMeasurement()) {
-                ImGui::Text("Distance: %.2f units", mapEditor->GetMeasurementDistance());
-                PCD::Vec3 start = mapEditor->GetMeasureStart();
-                PCD::Vec3 end = mapEditor->GetMeasureEnd();
-                ImGui::Text("From: %.1f, %.1f, %.1f", start.x, start.y, start.z);
-                ImGui::Text("To: %.1f, %.1f, %.1f", end.x, end.y, end.z);
-                
-                if (ImGui::Button("Clear Measurement")) {
-                    mapEditor->ClearMeasurement();
-                }
-            } else {
-                ImGui::TextDisabled("Shift+M to measure");
-            }
-        }
-        
-        if (ImGui::CollapsingHeader("Camera")) {
-            ImGui::Text("Position: %.1f, %.1f, %.1f", 
-                        cameraPosition.x, cameraPosition.y, cameraPosition.z);
-            ImGui::Text("Focus: %.1f, %.1f, %.1f",
-                        cameraFocusPoint.x, cameraFocusPoint.y, cameraFocusPoint.z);
-            ImGui::Text("Distance: %.1f", cameraDistance);
-            
-            ImGui::Separator();
-            
-            static char bookmarkName[64] = "Bookmark";
-            ImGui::InputText("Name##bm", bookmarkName, sizeof(bookmarkName));
-            if (ImGui::Button("Add Bookmark")) {
-                mapEditor->AddBookmark(bookmarkName, 
-                                       cameraFocusPoint.x, cameraFocusPoint.y, cameraFocusPoint.z,
-                                       cameraYaw, cameraPitch, cameraDistance);
-            }
-            
-            const auto& bookmarks = mapEditor->GetBookmarks();
-            for (size_t i = 0; i < bookmarks.size(); i++) {
-                ImGui::PushID((int)i);
-                if (ImGui::Button(bookmarks[i].name.c_str(), ImVec2(150, 0))) {
-                    cameraFocusPoint = Vec3(bookmarks[i].x, bookmarks[i].y, bookmarks[i].z);
-                    cameraYaw = bookmarks[i].yaw;
-                    cameraPitch = bookmarks[i].pitch;
-                    cameraDistance = bookmarks[i].distance;
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("X")) {
-                    mapEditor->RemoveBookmark(i);
-                }
-                ImGui::PopID();
-            }
         }
     }
     ImGui::End();
@@ -547,17 +681,14 @@ void EditorApp::KeyCallback(GLFWwindow *window, int key, int scancode,
             ImGuiIO &io = ImGui::GetIO();
             if (io.WantCaptureKeyboard) return;
 
-            // Focus on selection
             if (key == GLFW_KEY_F) {
                 app->FocusOnSelection();
             }
             
-            // Gizmo mode cycling with Tab
             if (key == GLFW_KEY_TAB && !(mods & GLFW_MOD_CONTROL)) {
                 app->mapEditor->CycleGizmoMode();
             }
 
-            // Ctrl shortcuts
             if (mods & GLFW_MOD_CONTROL) {
                 switch (key) {
                     case GLFW_KEY_N: app->mapEditor->NewMap(); break;
@@ -573,7 +704,6 @@ void EditorApp::KeyCallback(GLFWwindow *window, int key, int scancode,
                     case GLFW_KEY_H: app->mapEditor->HollowBrush(); break;
                 }
             } else {
-                // Tool shortcuts
                 switch (key) {
                     case GLFW_KEY_1: app->mapEditor->SetTool(PCD::EditorTool::SELECT); break;
                     case GLFW_KEY_2: app->mapEditor->SetTool(PCD::EditorTool::MOVE); break;
@@ -584,10 +714,10 @@ void EditorApp::KeyCallback(GLFWwindow *window, int key, int scancode,
                     case GLFW_KEY_C: app->mapEditor->SetTool(PCD::EditorTool::CREATE_CYLINDER); break;
                     case GLFW_KEY_DELETE: app->mapEditor->DeleteSelected(); break;
                     case GLFW_KEY_ESCAPE: app->mapEditor->DeselectAll(); break;
-                    case GLFW_KEY_G: // Toggle grid snap
+                    case GLFW_KEY_G:
                         app->mapEditor->GetSettings().snapToGrid = !app->mapEditor->GetSettings().snapToGrid;
                         break;
-                    case GLFW_KEY_H: // Toggle grid visibility
+                    case GLFW_KEY_H:
                         app->mapEditor->GetSettings().showGrid = !app->mapEditor->GetSettings().showGrid;
                         break;
                 }
@@ -696,7 +826,6 @@ void EditorApp::MouseCallback(GLFWwindow *window, double xpos, double ypos) {
         ImGuiIO &io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
 
-        // Camera controls
         if (app->isRightDragging) {
             app->OrbitCamera(dx, dy);
         }
@@ -707,31 +836,6 @@ void EditorApp::MouseCallback(GLFWwindow *window, double xpos, double ypos) {
 
         if (app->cameraMode == CameraMode::ORBIT && app->isLeftDragging) {
             app->OrbitCamera(dx, dy);
-        }
-
-        // Object manipulation - FIXED: Now passing proper delta values
-        if (app->mapEditor && app->isLeftDragging && app->cameraMode == CameraMode::FREE) {
-            // Calculate world-space movement from screen-space delta
-            float moveScale = app->cameraDistance * 0.003f;
-            
-            Vec3 right = app->GetCameraRight();
-            Vec3 forward = app->GetCameraForward();
-            Vec3 up = app->GetCameraUp();
-            
-            // For horizontal movement (screen X maps to camera right)
-            // For vertical movement (screen Y maps to camera up for Y axis, forward for XZ)
-            float worldDX = dx * right.x * moveScale;
-            float worldDY = -dy * moveScale; // Direct Y movement for Y-axis gizmo
-            float worldDZ = dx * right.z * moveScale;
-            
-            // Add forward component for depth movement
-            worldDX += -dy * forward.x * moveScale * 0.5f;
-            worldDZ += -dy * forward.z * moveScale * 0.5f;
-
-            bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
-                         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-
-            app->mapEditor->OnMouseDrag(worldDX, worldDY, worldDZ, dx, dy, shift);
         }
     }
 }

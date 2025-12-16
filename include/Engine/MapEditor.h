@@ -1101,41 +1101,43 @@ private:
         out[3] = mat[3]*vec[0] + mat[7]*vec[1] + mat[11]*vec[2] + mat[15]*vec[3];
     }
 
-    float RayCylinderIntersect(const Ray& ray, const PCD::Vec3& start,
-                               const PCD::Vec3& end, float radius) {
-        PCD::Vec3 axis = (end - start).Normalized();
-        PCD::Vec3 oc = ray.origin - start;
-        float axisLen = (end - start).Length();
+   float RayCylinderIntersect(const Ray& ray, const PCD::Vec3& start,
+                           const PCD::Vec3& end, float radius) {
+    PCD::Vec3 axis = (end - start).Normalized();
+    PCD::Vec3 oc = ray.origin - start;
+    float axisLen = (end - start).Length();
 
-        float rayDotAxis = ray.direction.x*axis.x + ray.direction.y*axis.y + ray.direction.z*axis.z;
-        float ocDotAxis = oc.x*axis.x + oc.y*axis.y + oc.z*axis.z;
+    float rayDotAxis = ray.direction.x*axis.x + ray.direction.y*axis.y + ray.direction.z*axis.z;
+    float ocDotAxis = oc.x*axis.x + oc.y*axis.y + oc.z*axis.z;
 
-        PCD::Vec3 rayPerp(ray.direction.x - rayDotAxis*axis.x,
-                          ray.direction.y - rayDotAxis*axis.y,
-                          ray.direction.z - rayDotAxis*axis.z);
-        PCD::Vec3 ocPerp(oc.x - ocDotAxis*axis.x,
-                         oc.y - ocDotAxis*axis.y,
-                         oc.z - ocDotAxis*axis.z);
+    PCD::Vec3 rayPerp(ray.direction.x - rayDotAxis*axis.x,
+                      ray.direction.y - rayDotAxis*axis.y,
+                      ray.direction.z - rayDotAxis*axis.z);
+    PCD::Vec3 ocPerp(oc.x - ocDotAxis*axis.x,
+                     oc.y - ocDotAxis*axis.y,
+                     oc.z - ocDotAxis*axis.z);
 
-        float a = rayPerp.x*rayPerp.x + rayPerp.y*rayPerp.y + rayPerp.z*rayPerp.z;
-        float b = 2.0f*(ocPerp.x*rayPerp.x + ocPerp.y*rayPerp.y + ocPerp.z*rayPerp.z);
-        float c = ocPerp.x*ocPerp.x + ocPerp.y*ocPerp.y + ocPerp.z*ocPerp.z - radius*radius;
+    float a = rayPerp.x*rayPerp.x + rayPerp.y*rayPerp.y + rayPerp.z*rayPerp.z;
+    float b = 2.0f*(ocPerp.x*rayPerp.x + ocPerp.y*rayPerp.y + ocPerp.z*rayPerp.z);
+    float c = ocPerp.x*ocPerp.x + ocPerp.y*ocPerp.y + ocPerp.z*ocPerp.z - radius*radius;
 
-        float discriminant = b*b - 4.0f*a*c;
-        if (discriminant < 0.0f) return -1.0f;
+    float discriminant = b*b - 4.0f*a*c;
+    if (discriminant < 0.0f) return -1.0f;
 
-        float t = (-b - sqrt(discriminant)) / (2.0f*a);
-        if (t < 0.0f) t = (-b + sqrt(discriminant)) / (2.0f*a);
-        if (t < 0.0f) return -1.0f;
+    float t = (-b - sqrt(discriminant)) / (2.0f*a);
+    if (t < 0.0f) t = (-b + sqrt(discriminant)) / (2.0f*a);
+    if (t < 0.0f) return -1.0f;
 
-        PCD::Vec3 hitPoint = ray.origin + ray.direction * t;
-        PCD::Vec3 toHit = hitPoint - start;
-        float projLen = toHit.x*axis.x + toHit.y*axis.y + toHit.z*axis.z;
+    PCD::Vec3 hitPoint = ray.origin + ray.direction * t;
+    PCD::Vec3 toHit = hitPoint - start;
+    float projLen = toHit.x*axis.x + toHit.y*axis.y + toHit.z*axis.z;
 
-        if (projLen < 0.0f || projLen > axisLen) return -1.0f;
+    // IMPROVED: Add tolerance at ends
+    float tolerance = 0.5f; // Allow clicking slightly beyond arrow
+    if (projLen < -tolerance || projLen > axisLen + tolerance) return -1.0f;
 
-        return t;
-    }
+    return t;
+}
 
     float RaySphereIntersect(const Ray& ray, const PCD::Vec3& center, float radius) {
         PCD::Vec3 oc = ray.origin - center;
