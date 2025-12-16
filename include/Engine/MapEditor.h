@@ -142,7 +142,14 @@ public:
     }
 
     ~MapEditor() { delete ui; }
+void SetUnsavedChanges(bool changed) { 
+    state.hasUnsavedChanges = changed; 
+}
 
+
+	PCD::EditorTool GetCurrentTool() { 
+return state.currentTool;
+}
     // Core getters
     PCD::Map& GetMap() { return state.map; }
     const PCD::Map& GetMap() const { return state.map; }

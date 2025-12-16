@@ -163,7 +163,7 @@ void EditorApp::ProcessInput(float dt) {
         float moveSpeed = shiftPressed ? 1.0f : 0.1f; // Shift = faster movement
         float scaleSpeed = shiftPressed ? 0.1f : 0.01f; // Shift = faster scaling
         
-        PCD::EditorTool currentTool = mapEditor->GetSettings().currentTool;
+        PCD::EditorTool currentTool = mapEditor->GetCurrentTool();
         
         // MOVE tool - Arrow keys for XZ, Q/E for Y
         if (currentTool == PCD::EditorTool::MOVE) {
@@ -203,12 +203,12 @@ void EditorApp::ProcessInput(float dt) {
                     for (auto& v : brush.vertices) {
                         v.position = v.position + delta;
                     }
-                    mapEditor->GetMap().hasUnsavedChanges = true;
+                    mapEditor->SetUnsavedChanges(true);
                 }
                 if (mapEditor->GetSelectedEntityIndex() >= 0) {
                     auto& ent = mapEditor->GetMap().entities[mapEditor->GetSelectedEntityIndex()];
                     ent.position = ent.position + delta;
-                    mapEditor->GetMap().hasUnsavedChanges = true;
+                    mapEditor->SetUnsavedChanges(true);
                 }
             }
         }
@@ -250,7 +250,7 @@ void EditorApp::ProcessInput(float dt) {
                     ent.scale.x = std::max(0.1f, ent.scale.x * scaleDelta.x);
                     ent.scale.y = std::max(0.1f, ent.scale.y * scaleDelta.y);
                     ent.scale.z = std::max(0.1f, ent.scale.z * scaleDelta.z);
-                    mapEditor->GetMap().hasUnsavedChanges = true;
+                    mapEditor->SetUnsavedChanges(true);
                 }
                 
                 // Scale brush from center
@@ -276,7 +276,7 @@ void EditorApp::ProcessInput(float dt) {
                         offset.z *= scaleDelta.z;
                         v.position = center + offset;
                     }
-                    mapEditor->GetMap().hasUnsavedChanges = true;
+                    mapEditor->SetUnsavedChanges(true);
                 }
             }
         }
@@ -319,7 +319,7 @@ void EditorApp::ProcessInput(float dt) {
                     ent.rotation.x += rotation.x;
                     ent.rotation.y += rotation.y;
                     ent.rotation.z += rotation.z;
-                    mapEditor->GetMap().hasUnsavedChanges = true;
+                    mapEditor->SetUnsavedChanges(true);
                 }
                 
                 // Rotate brush around center
@@ -357,7 +357,7 @@ void EditorApp::ProcessInput(float dt) {
                         }
                     }
                     
-                    mapEditor->GetMap().hasUnsavedChanges = true;
+                    mapEditor->SetUnsavedChanges(true);
                 }
             }
         }
