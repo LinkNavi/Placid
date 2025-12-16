@@ -79,6 +79,10 @@ private:
     void UpdateCamera(float dt);
     void Render();
     
+    // UI Panels
+    void RenderStatsPanel();
+    void RenderToolsPanel();
+    
     // Camera functions
     void FocusOnSelection();
     void OrbitCamera(float deltaX, float deltaY);
